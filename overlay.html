@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Snipd selection</title>
+    <style>
+      /*
+       * The overlay window is transparent, so the user drags over the live
+       * desktop rather than a screenshot of it. The pixels that get saved come
+       * from a frame frozen in Rust before this window appeared, so nothing
+       * moving underneath can change what is captured mid-drag.
+       */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+        cursor: crosshair;
+        /* Selecting page text with a crosshair drag would be nonsense here. */
+        user-select: none;
+        -webkit-user-select: none;
+      }
+
+      /* Dims the whole screen before a drag begins. */
+      #dim {
+        position: fixed;
+        inset: 0;
+        background: rgba(12, 14, 18, 0.35);
+      }
+
+      /*
+       * The selection rectangle punches a hole in the dimming using an
+       * oversized box-shadow spread, which is cheaper and smoother during a
+       * drag than recomputing four separate mask elements every mousemove.
+       */
+      #selection {
+        position: fixed;
+        display: none;
+        box-shadow: 0 0 0 100vmax rgba(12, 14, 18, 0.35);
+        outline: 1px solid rgba(255, 255, 255, 0.9);
+        /* Keeps the 1px outline crisp rather than straddling a device pixel. */
+        outline-offset: -1px;
+      }
+
+      /* Live pixel dimensions, pinned near the cursor. */
+      #readout {
+        position: fixed;
+        display: none;
+        padding: 3px 7px;
+        font:
+          12px/1.4 "Segoe UI Variable Text",
+          "Segoe UI",
+          system-ui,
+          sans-serif;
+        font-variant-numeric: tabular-nums;
+        color: #fff;
+        background: rgba(12, 14, 18, 0.88);
+        border-radius: 4px;
+        white-space: nowrap;
+        pointer-events: none;
+      }
+
+      /* One-line instruction, shown until the drag starts. */
+      #hint {
+        position: fixed;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 8px 16px;
+        font:
+          13px/1.4 "Segoe UI Variable Text",
+          "Segoe UI",
+          system-ui,
+          sans-serif;
+        color: #fff;
+        background: rgba(12, 14, 18, 0.88);
+        border-radius: 6px;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="dim"></div>
+    <div id="selection"></div>
+    <div id="readout"></div>
+    <div id="hint">Drag to select an area · Esc or right-click to cancel</div>
+    <script type="module" src="/src/overlay.ts"></script>
+  </body>
+</html>

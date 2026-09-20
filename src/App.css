@@ -1,0 +1,181 @@
+/*
+ * Phase 1 styling only — intentionally neutral.
+ *
+ * The app's actual visual identity is a later phase and will be designed
+ * deliberately rather than accumulated. Nothing here should be treated as a
+ * decision about how Snipd looks; it is scaffolding so the capture engine can
+ * be tested.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --border: #d8dce2;
+  --text: #1b1f24;
+  --text-muted: #5b6370;
+  --accent: #2f5fd8;
+  --error-bg: #fdf2f2;
+  --error-border: #e5b3b3;
+  --error-text: #8a1f1f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171c;
+    --surface: #1c2027;
+    --border: #2d333c;
+    --text: #e8eaed;
+    --text-muted: #9aa3b0;
+    --accent: #6f9bff;
+    --error-bg: #2a1a1a;
+    --error-border: #5a2e2e;
+    --error-text: #ffb4b4;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font:
+    14px/1.5 "Segoe UI Variable Text",
+    "Segoe UI",
+    system-ui,
+    sans-serif;
+}
+
+.app {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.app__header h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.app__subtitle {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.panel h2 {
+  margin: 0 0 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.panel--error {
+  background: var(--error-bg);
+  border-color: var(--error-border);
+}
+
+.panel--error h2,
+.panel--error p {
+  color: var(--error-text);
+}
+
+.panel--error p {
+  margin: 0;
+  word-break: break-word;
+}
+
+.panel--quiet {
+  background: transparent;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 420px;
+}
+
+.field span {
+  color: var(--text-muted);
+}
+
+select {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.controls {
+  margin-bottom: 16px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+button {
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.details {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 8px 16px;
+  margin: 0 0 16px;
+}
+
+.details dt {
+  color: var(--text-muted);
+}
+
+.details dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+.details__path {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+}
+
+.warnings {
+  margin: 0 0 16px;
+  padding-left: 18px;
+  color: var(--error-text);
+}

@@ -1,0 +1,64 @@
+[package]
+name = "snipd"
+version = "0.1.0"
+description = "A screenshot tool for Windows that never loses a capture"
+authors = ["Snipd Contributors"]
+license = "MIT"
+repository = "https://github.com/snipd-app/snipd"
+edition = "2021"
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "snipd_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Image encoding. Only the two formats the app offers are compiled in, which
+# keeps the binary meaningfully smaller than the crate's default feature set.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+
+# Capture timestamps and filename formatting.
+chrono = "0.4"
+
+# Resolves the Windows known folders (Pictures, AppData) properly, rather than
+# assuming a path under the user profile.
+dirs = "6"
+
+# Clipboard image support.
+arboard = "3"
+
+thiserror = "2"
+
+# Direct Win32 access for the capture backend. See src/capture/win.rs for why
+# this is preferred over a cross-platform capture crate.
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.62"
+features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_HiDpi",
+    "Win32_System_Threading",
+]
+
+[dev-dependencies]
+tempfile = "3"
+
+# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

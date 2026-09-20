@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Core permissions for the main window and the region-selection overlay.",
+  "windows": ["main", "overlay"],
+  "permissions": ["core:default", "opener:default"]
+}
