@@ -1,46 +1,88 @@
 //! Snipd — a screenshot tool for Windows that never loses a capture.
 //!
-//! This module wires the capture engine to the UI. The interesting logic lives
-//! in the sibling modules; what happens here is state ownership, the Tauri
-//! command surface, and the lifecycle of the region-selection overlay.
+//! This module owns application state and wires everything together. The
+//! interesting logic lives in the sibling modules:
+//!
+//! * [`capture`] — reading pixels and getting them safely onto disk
+//! * [`overlay`] — the capture overlay and its session lifetime
+//! * [`tray`] / [`shortcuts`] — summoning the app with no window open
+//! * [`config`] / [`naming`] — settings and filenames
 
 pub mod branding;
 pub mod capture;
 pub mod clipboard;
 pub mod config;
+pub mod history;
 pub mod naming;
+pub mod overlay;
+pub mod shortcuts;
+pub mod tray;
 
 use std::sync::Mutex;
 
-use tauri::{
-    Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewUrl, WebviewWindowBuilder,
-};
+use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 
-use capture::win::{self, Bounds, Frame, MonitorInfo, VirtualDesktop};
-use capture::{CaptureKind, CaptureRecord, CaptureRequest};
+use capture::win::{self, MonitorInfo, VirtualDesktop};
+use capture::{CaptureRecord, CaptureRequest};
 use config::{NamingSettings, Settings};
+use overlay::CaptureSession;
 
-/// Window label for the region-selection overlay.
-const OVERLAY_LABEL: &str = "overlay";
+/// Command-line flag the autostart registration passes, so "start minimised"
+/// applies to logging in and not to the user double-clicking the app.
+const AUTOSTART_FLAG: &str = "--autostart";
 
 /// Application state shared across commands.
 pub struct AppState {
-    /// The live settings. Mutable because prefix-mode naming consumes a counter.
-    settings: Mutex<Settings>,
-    /// Pixels frozen at the moment region selection began.
-    ///
-    /// Region capture reads the screen *before* putting its overlay up, then
-    /// crops from this. Re-reading the screen after the overlay is visible would
-    /// capture the overlay itself.
-    frozen: Mutex<Option<Frame>>,
+    /// Live settings. Mutable because prefix-mode naming consumes a counter.
+    pub settings: Mutex<Settings>,
+    /// The in-progress capture, if the overlay is open. Holds a frozen copy of
+    /// the whole virtual desktop, so it is cleared the moment it is finished
+    /// with rather than lingering in a tray-resident process.
+    pub session: Mutex<Option<CaptureSession>>,
+    /// Shortcuts that could not be bound at startup, for Settings to surface.
+    pub shortcut_warnings: Mutex<Vec<String>>,
 }
 
-/// What the overlay needs in order to draw itself.
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RegionSession {
-    /// The area the overlay covers, in virtual-screen coordinates.
-    desktop: VirtualDesktop,
+/// A capture taken without showing the overlay.
+#[derive(Debug, Clone, Copy)]
+pub enum ImmediateMode {
+    FullScreen,
+    ActiveWindow,
+}
+
+/// Capture and save straight away, reporting the result by event.
+///
+/// Used by the tray menu and the direct-mode global shortcuts, where there is no
+/// caller waiting on a return value.
+pub fn capture_immediate(app: &AppHandle, mode: ImmediateMode) {
+    let app = app.clone();
+
+    // Off the UI thread: encoding a full-resolution PNG takes long enough that
+    // doing it inline would visibly stall the tray menu closing.
+    tauri::async_runtime::spawn_blocking(move || {
+        let request = match mode {
+            ImmediateMode::FullScreen => CaptureRequest::FullScreen { monitor_id: None },
+            ImmediateMode::ActiveWindow => CaptureRequest::ActiveWindow,
+        };
+
+        let state = app.state::<AppState>();
+        let mut settings = match state.settings.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                let _ = app.emit("capture-failed", "settings lock poisoned");
+                return;
+            }
+        };
+
+        match capture::capture_and_save(request, &mut settings) {
+            Ok(record) => {
+                let _ = app.emit("capture-complete", &record);
+            }
+            Err(err) => {
+                let _ = app.emit("capture-failed", err);
+            }
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -53,6 +95,12 @@ fn list_monitors() -> Vec<MonitorInfo> {
     win::monitors()
 }
 
+/// Bounding box of all displays.
+#[tauri::command]
+fn get_virtual_desktop() -> VirtualDesktop {
+    win::virtual_desktop()
+}
+
 /// The current settings, for the UI to render.
 #[tauri::command]
 fn get_settings(state: State<'_, AppState>) -> Result<Settings, String> {
@@ -63,19 +111,23 @@ fn get_settings(state: State<'_, AppState>) -> Result<Settings, String> {
         .map_err(|_| "settings lock poisoned".to_string())
 }
 
+/// Shortcuts that failed to bind, so Settings can explain why one does nothing.
+#[tauri::command]
+fn get_shortcut_warnings(state: State<'_, AppState>) -> Vec<String> {
+    state
+        .shortcut_warnings
+        .lock()
+        .map(|w| w.clone())
+        .unwrap_or_default()
+}
+
 /// Render a filename preview without touching the disk.
-///
-/// Used by the Settings screen so the user sees the effect of a naming change
-/// before committing to it. Mirrors what the installer wizard shows.
 #[tauri::command]
 fn filename_preview(naming: NamingSettings, extension: String) -> String {
     naming::preview(&naming, &extension, chrono::Local::now())
 }
 
-/// Take a capture immediately and save it.
-///
-/// Covers full-screen and active-window modes. Region capture goes through the
-/// overlay commands below instead.
+/// Capture immediately from the UI, bypassing the overlay.
 #[tauri::command]
 fn capture(request: CaptureRequest, state: State<'_, AppState>) -> Result<CaptureRecord, String> {
     let mut settings = state
@@ -83,141 +135,6 @@ fn capture(request: CaptureRequest, state: State<'_, AppState>) -> Result<Captur
         .lock()
         .map_err(|_| "settings lock poisoned".to_string())?;
     capture::capture_and_save(request, &mut settings)
-}
-
-/// Freeze the screen and raise the selection overlay.
-///
-/// The overlay is a single transparent, always-on-top window stretched across
-/// the whole virtual desktop. One window rather than one per display, because a
-/// selection that spans two monitors must be a single continuous drag — and
-/// because the frozen frame it crops from is itself one continuous image.
-#[tauri::command]
-async fn begin_region_capture(
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-) -> Result<RegionSession, String> {
-    // Freeze first, so the overlay can never appear in its own capture.
-    let frame = win::capture_virtual_desktop().map_err(|e| e.to_string())?;
-    let desktop = win::virtual_desktop();
-
-    {
-        let mut frozen = state
-            .frozen
-            .lock()
-            .map_err(|_| "frozen-frame lock poisoned".to_string())?;
-        *frozen = Some(frame);
-    }
-
-    // Reuse the overlay window if a previous selection left it around.
-    if let Some(existing) = app.get_webview_window(OVERLAY_LABEL) {
-        let _ = existing.close();
-    }
-
-    let overlay = WebviewWindowBuilder::new(
-        &app,
-        OVERLAY_LABEL,
-        WebviewUrl::App("overlay.html".into()),
-    )
-    .title("Snipd selection")
-    .decorations(false)
-    .transparent(true)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .resizable(false)
-    .shadow(false)
-    // Built hidden and shown only once it is positioned, so the user never sees
-    // it flash at the wrong size on the wrong monitor.
-    .visible(false)
-    .build()
-    .map_err(|e| format!("could not create the selection overlay: {e}"))?;
-
-    // Position in *physical* pixels. Logical coordinates would be scaled by the
-    // DPI of whichever display Windows decided the window belongs to, which is
-    // wrong the moment displays have different scaling.
-    overlay
-        .set_position(PhysicalPosition::new(desktop.x, desktop.y))
-        .map_err(|e| e.to_string())?;
-    overlay
-        .set_size(PhysicalSize::new(desktop.width, desktop.height))
-        .map_err(|e| e.to_string())?;
-    overlay.show().map_err(|e| e.to_string())?;
-    overlay.set_focus().map_err(|e| e.to_string())?;
-
-    Ok(RegionSession { desktop })
-}
-
-/// The bounding box of all displays. The overlay uses this to convert the CSS
-/// pixels it draws in back into virtual-screen coordinates.
-#[tauri::command]
-fn get_virtual_desktop() -> VirtualDesktop {
-    win::virtual_desktop()
-}
-
-/// Crop the frozen frame to the user's selection and save it.
-///
-/// The result is announced with the `capture-complete` (or `capture-failed`)
-/// event rather than only being returned. The caller is the overlay window,
-/// which this function closes — so its pending response would be dropped along
-/// with its webview. Events reach the main window, which is what needs to know.
-#[tauri::command]
-fn finish_region_capture(
-    bounds: Bounds,
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-) -> Result<CaptureRecord, String> {
-    let outcome = save_region(bounds, &state);
-
-    match &outcome {
-        Ok(record) => {
-            let _ = app.emit("capture-complete", record);
-        }
-        Err(message) => {
-            let _ = app.emit("capture-failed", message);
-        }
-    }
-
-    // Closed last, so the save is already done and reported by the time the
-    // screen is handed back to the user.
-    close_overlay(&app);
-    outcome
-}
-
-/// The save half of [`finish_region_capture`], split out so the overlay is
-/// closed on both the success and failure paths.
-fn save_region(bounds: Bounds, state: &State<'_, AppState>) -> Result<CaptureRecord, String> {
-    let frame = {
-        let mut frozen = state
-            .frozen
-            .lock()
-            .map_err(|_| "frozen-frame lock poisoned".to_string())?;
-        frozen
-            .take()
-            .ok_or_else(|| "no region selection is in progress".to_string())?
-    };
-
-    let cropped = frame.crop(bounds).map_err(|e| e.to_string())?;
-    let source = win::monitor_at((bounds.x, bounds.y)).map(|m| m.label);
-
-    let mut settings = state
-        .settings
-        .lock()
-        .map_err(|_| "settings lock poisoned".to_string())?;
-
-    capture::save_frame(cropped, CaptureKind::Region, source, &mut settings)
-}
-
-/// Abandon a selection, discarding the frozen frame.
-#[tauri::command]
-fn cancel_region_capture(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    close_overlay(&app);
-    let mut frozen = state
-        .frozen
-        .lock()
-        .map_err(|_| "frozen-frame lock poisoned".to_string())?;
-    // Dropping the frame here matters: a full virtual-desktop capture is tens of
-    // megabytes, and this process stays resident in the tray all day.
-    *frozen = None;
-    Ok(())
 }
 
 /// Open File Explorer with the given file selected.
@@ -235,10 +152,110 @@ fn reveal_in_explorer(path: String) -> Result<(), String> {
     Ok(())
 }
 
-fn close_overlay(app: &tauri::AppHandle) {
-    if let Some(overlay) = app.get_webview_window(OVERLAY_LABEL) {
-        let _ = overlay.close();
+/// Hide the main window to the tray.
+#[tauri::command]
+fn hide_to_tray(app: AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
     }
+}
+
+/// A page of capture history, newest first.
+#[tauri::command]
+fn history_list(
+    query: history::HistoryQuery,
+    state: State<'_, AppState>,
+) -> Result<history::HistoryPage, String> {
+    let directory = save_directory(&state)?;
+    history::list(&query, &directory)
+}
+
+/// Delete one capture, and its cached thumbnail.
+#[tauri::command]
+fn history_delete(path: String, state: State<'_, AppState>) -> Result<(), String> {
+    let directory = save_directory(&state)?;
+    history::delete(std::path::Path::new(&path), &directory)
+}
+
+/// Put an existing capture back on the clipboard.
+#[tauri::command]
+fn copy_capture(path: String) -> Result<(), String> {
+    let image = image::open(&path)
+        .map_err(|e| format!("could not read {path}: {e}"))?
+        .to_rgba8();
+    clipboard::copy_image(&image).map(|_| ())
+}
+
+/// Read the configured save folder without holding the lock any longer than needed.
+fn save_directory(state: &State<'_, AppState>) -> Result<std::path::PathBuf, String> {
+    state
+        .settings
+        .lock()
+        .map(|s| s.save_directory.clone())
+        .map_err(|_| "settings lock poisoned".to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Image protocol
+// ---------------------------------------------------------------------------
+
+/// Serve images to the webview straight from memory or the thumbnail cache.
+///
+/// Two routes:
+/// * `/backdrop` — the frozen desktop the capture overlay draws on
+/// * `/thumb?k=…` — a history thumbnail, generated on first request and cached
+///
+/// Thumbnails are addressed by an opaque key rather than a file path, so the
+/// webview cannot ask this handler for an arbitrary file: a key only resolves if
+/// it matches something currently sitting in the save folder.
+fn serve_image(
+    app: &AppHandle,
+    path: &str,
+    query: Option<&str>,
+) -> tauri::http::Response<Vec<u8>> {
+    let bytes = match path {
+        "/backdrop" => overlay::serve_backdrop(app).map(|b| b.as_ref().clone()),
+        "/thumb" => query
+            .and_then(|q| query_param(q, "k"))
+            .and_then(|key| {
+                let directory = app
+                    .state::<AppState>()
+                    .settings
+                    .lock()
+                    .ok()
+                    .map(|s| s.save_directory.clone())?;
+                history::resolve_thumbnail_key(&key, &directory)
+            })
+            .and_then(|file| history::thumbnail(&file).ok()),
+        _ => None,
+    };
+
+    let builder = tauri::http::Response::builder();
+    match bytes {
+        Some(body) => builder
+            .header("Content-Type", "image/jpeg")
+            // Keys already change when a file does, but this removes any chance
+            // of a stale frame or thumbnail surviving in the webview cache.
+            .header("Cache-Control", "no-store")
+            .body(body)
+            .unwrap_or_else(|_| empty(500)),
+        None => empty(404),
+    }
+}
+
+fn empty(status: u16) -> tauri::http::Response<Vec<u8>> {
+    tauri::http::Response::builder()
+        .status(status)
+        .body(Vec::new())
+        .expect("an empty response is always valid")
+}
+
+/// Pull one value out of a URL query string.
+fn query_param(query: &str, key: &str) -> Option<String> {
+    query.split('&').find_map(|pair| {
+        let (name, value) = pair.split_once('=')?;
+        (name == key).then(|| value.to_string())
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -247,7 +264,7 @@ fn close_overlay(app: &tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Must happen before any window exists, or Windows will hand us virtualised
+    // Must happen before any window exists, or Windows hands back virtualised
     // coordinates and blurry captures on scaled displays.
     win::ensure_dpi_awareness();
 
@@ -257,28 +274,102 @@ pub fn run() {
 
     let settings = Settings::load_or_seed(exe_dir.as_deref());
 
-    // Create the save folder up front so the very first capture is not the thing
-    // that discovers the configured path is unusable.
+    // Create the save folder now, so the first capture is not the thing that
+    // discovers the configured path is unusable.
     if let Err(err) = settings.ensure_save_directory() {
         eprintln!("[startup] save directory problem: {err}");
     }
 
+    let launched_at_login = std::env::args().any(|arg| arg == AUTOSTART_FLAG);
+    let start_hidden = launched_at_login && settings.startup.start_minimised;
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(AppState {
             settings: Mutex::new(settings),
-            frozen: Mutex::new(None),
+            session: Mutex::new(None),
+            shortcut_warnings: Mutex::new(Vec::new()),
+        })
+        // Serves the overlay's frozen backdrop straight from memory. Going via
+        // disk or base64-over-IPC would both add a visible delay before the
+        // overlay can draw.
+        .register_uri_scheme_protocol(overlay::FRAME_SCHEME, |ctx, request| {
+            serve_image(ctx.app_handle(), request.uri().path(), request.uri().query())
+        })
+        .on_window_event(|window, event| {
+            // Closing the main window hides it instead of quitting, so the
+            // global shortcut keeps working. Configurable, because some people
+            // genuinely want the X button to mean quit.
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() != "main" {
+                    return;
+                }
+
+                let close_to_tray = window
+                    .app_handle()
+                    .state::<AppState>()
+                    .settings
+                    .lock()
+                    .map(|s| s.window.close_to_tray)
+                    .unwrap_or(true);
+
+                if close_to_tray {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
+        .setup(move |app| {
+            let handle = app.handle();
+
+            tray::build(handle)?;
+
+            let warnings = {
+                let state = handle.state::<AppState>();
+                let settings = state
+                    .settings
+                    .lock()
+                    .map(|s| s.shortcuts.clone())
+                    .unwrap_or_default();
+                shortcuts::apply(handle, &settings)
+            };
+
+            for warning in &warnings {
+                eprintln!("[shortcuts] {warning}");
+            }
+            if let Ok(mut slot) = handle.state::<AppState>().shortcut_warnings.lock() {
+                *slot = warnings;
+            }
+
+            // The window is built hidden so that starting at login never flashes
+            // it on screen. A manual launch shows it immediately.
+            if !start_hidden {
+                if let Some(window) = handle.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+
+            Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             list_monitors,
+            get_virtual_desktop,
             get_settings,
+            get_shortcut_warnings,
             filename_preview,
             capture,
-            get_virtual_desktop,
-            begin_region_capture,
-            finish_region_capture,
-            cancel_region_capture,
             reveal_in_explorer,
+            hide_to_tray,
+            history_list,
+            history_delete,
+            copy_capture,
+            overlay::begin_capture,
+            overlay::overlay_state,
+            overlay::capture_rect,
+            overlay::capture_freeform,
+            overlay::cancel_capture,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Snipd");

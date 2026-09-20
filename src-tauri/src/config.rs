@@ -168,19 +168,26 @@ impl Default for NotificationSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ShortcutSettings {
-    pub full_screen: String,
-    pub active_window: String,
+    /// The main one: opens the capture overlay, where the mode is chosen.
+    pub capture: String,
+    /// Opens the overlay with the rectangle tool already selected.
     pub region: String,
+    /// Captures immediately without showing the overlay at all.
+    pub full_screen: String,
+    /// Captures the frontmost window immediately, no overlay.
+    pub active_window: String,
 }
 
 impl Default for ShortcutSettings {
     fn default() -> Self {
-        // Chosen to avoid colliding with the Windows 11 built-in Snipping Tool
-        // binding (Win+Shift+S), which the user may still want to keep.
+        // Deliberately not Win+Shift+S: that is the built-in Snipping Tool
+        // binding, and taking it would stop the user falling back to the tool
+        // they already know while this one is still young.
         Self {
+            capture: "CommandOrControl+Alt+S".into(),
+            region: "CommandOrControl+Alt+3".into(),
             full_screen: "CommandOrControl+Alt+1".into(),
             active_window: "CommandOrControl+Alt+2".into(),
-            region: "CommandOrControl+Alt+3".into(),
         }
     }
 }

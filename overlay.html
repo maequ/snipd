@@ -2,13 +2,20 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Snipd selection</title>
+    <title>Snipd capture</title>
     <style>
       /*
-       * The overlay window is transparent, so the user drags over the live
-       * desktop rather than a screenshot of it. The pixels that get saved come
-       * from a frame frozen in Rust before this window appeared, so nothing
-       * moving underneath can change what is captured mid-drag.
+       * The overlay shows a still of the desktop, frozen the instant before it
+       * opened. Everything the user drags over is that image, so nothing can
+       * move, close or steal focus mid-selection.
+       *
+       * Layering, bottom to top:
+       *   #backdrop  the frozen desktop
+       *   #dim       darkens all of it
+       *   #bright    a second copy of the same image, clipped to the current
+       *              selection, which is what makes the selection look lit
+       *   #outline   the selection border and handles
+       *   toolbar    mode switcher
        */
       html,
       body {
@@ -17,65 +24,140 @@
         width: 100%;
         height: 100%;
         overflow: hidden;
-        background: transparent;
+        background: #000;
         cursor: crosshair;
-        /* Selecting page text with a crosshair drag would be nonsense here. */
         user-select: none;
         -webkit-user-select: none;
       }
 
-      /* Dims the whole screen before a drag begins. */
+      #backdrop,
+      #bright {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        /* The backdrop is a 1:1 still of the desktop; any scaling here would
+           make the preview disagree with the pixels actually saved. */
+        object-fit: fill;
+        pointer-events: none;
+        -webkit-user-drag: none;
+      }
+
       #dim {
         position: fixed;
         inset: 0;
-        background: rgba(12, 14, 18, 0.35);
+        background: rgba(10, 12, 16, 0.5);
+        pointer-events: none;
       }
 
-      /*
-       * The selection rectangle punches a hole in the dimming using an
-       * oversized box-shadow spread, which is cheaper and smoother during a
-       * drag than recomputing four separate mask elements every mousemove.
-       */
-      #selection {
+      #bright {
+        display: none;
+      }
+
+      #outline {
         position: fixed;
         display: none;
-        box-shadow: 0 0 0 100vmax rgba(12, 14, 18, 0.35);
-        outline: 1px solid rgba(255, 255, 255, 0.9);
-        /* Keeps the 1px outline crisp rather than straddling a device pixel. */
+        pointer-events: none;
+        outline: 1.5px solid #fff;
         outline-offset: -1px;
       }
 
-      /* Live pixel dimensions, pinned near the cursor. */
+      #lasso {
+        position: fixed;
+        inset: 0;
+        display: none;
+        pointer-events: none;
+      }
+
       #readout {
         position: fixed;
         display: none;
-        padding: 3px 7px;
-        font:
-          12px/1.4 "Segoe UI Variable Text",
-          "Segoe UI",
-          system-ui,
-          sans-serif;
+        padding: 4px 8px;
+        font: 12px/1.35 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
         font-variant-numeric: tabular-nums;
         color: #fff;
-        background: rgba(12, 14, 18, 0.88);
-        border-radius: 4px;
+        background: rgba(16, 19, 24, 0.92);
+        border-radius: 5px;
         white-space: nowrap;
         pointer-events: none;
       }
 
-      /* One-line instruction, shown until the drag starts. */
-      #hint {
+      /* --- toolbar --- */
+
+      #toolbar {
         position: fixed;
+        top: 20px;
         left: 50%;
         transform: translateX(-50%);
-        padding: 8px 16px;
-        font:
-          13px/1.4 "Segoe UI Variable Text",
-          "Segoe UI",
-          system-ui,
-          sans-serif;
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        padding: 5px;
+        background: rgba(28, 32, 39, 0.97);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 11px;
+        cursor: default;
+      }
+
+      .tool {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 8px 11px;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: rgba(255, 255, 255, 0.74);
+        font: 13px/1 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+        cursor: pointer;
+      }
+
+      .tool:hover {
+        background: rgba(255, 255, 255, 0.09);
         color: #fff;
-        background: rgba(12, 14, 18, 0.88);
+      }
+
+      .tool[aria-pressed="true"] {
+        background: rgba(255, 255, 255, 0.16);
+        color: #fff;
+      }
+
+      .tool svg {
+        width: 17px;
+        height: 17px;
+        flex: none;
+      }
+
+      .tool__label {
+        display: none;
+      }
+
+      /* Only the active tool spells its name out, so the bar stays compact
+         without leaving the current mode ambiguous. */
+      .tool[aria-pressed="true"] .tool__label {
+        display: inline;
+      }
+
+      .divider {
+        width: 1px;
+        height: 22px;
+        margin: 0 4px;
+        background: rgba(255, 255, 255, 0.16);
+      }
+
+      #delay-value {
+        font-variant-numeric: tabular-nums;
+      }
+
+      #hint {
+        position: fixed;
+        top: 84px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 7px 14px;
+        font: 12.5px/1.4 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+        color: rgba(255, 255, 255, 0.92);
+        background: rgba(16, 19, 24, 0.85);
         border-radius: 6px;
         pointer-events: none;
       }
@@ -83,10 +165,63 @@
   </head>
 
   <body>
+    <img id="backdrop" alt="" />
     <div id="dim"></div>
-    <div id="selection"></div>
+    <img id="bright" alt="" />
+    <svg id="lasso" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div id="outline"></div>
     <div id="readout"></div>
-    <div id="hint">Drag to select an area · Esc or right-click to cancel</div>
+
+    <div id="toolbar" role="toolbar" aria-label="Capture mode">
+      <button class="tool" type="button" data-mode="rectangle" aria-pressed="true" title="Rectangle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+          <rect x="3.5" y="5.5" width="17" height="13" rx="1.5" />
+        </svg>
+        <span class="tool__label">Rectangle</span>
+      </button>
+
+      <button class="tool" type="button" data-mode="freeform" aria-pressed="false" title="Freeform">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+          <path d="M4 14c0-5 4-9 8-9s8 3 8 7-4 7-8 7c-3 0-5-1-5-3s2-3 4-3" />
+        </svg>
+        <span class="tool__label">Freeform</span>
+      </button>
+
+      <button class="tool" type="button" data-mode="window" aria-pressed="false" title="Window">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+          <rect x="3.5" y="4.5" width="17" height="15" rx="1.5" />
+          <path d="M3.5 9h17" />
+        </svg>
+        <span class="tool__label">Window</span>
+      </button>
+
+      <button class="tool" type="button" data-mode="fullscreen" aria-pressed="false" title="Full screen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+          <rect x="2.5" y="4.5" width="19" height="12" rx="1.5" />
+          <path d="M8 20h8" />
+        </svg>
+        <span class="tool__label">Full screen</span>
+      </button>
+
+      <div class="divider"></div>
+
+      <button class="tool" id="delay" type="button" aria-pressed="false" title="Capture delay">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+          <circle cx="12" cy="13" r="8" />
+          <path d="M12 9v4l2.5 2M9 2h6" />
+        </svg>
+        <span class="tool__label" id="delay-value">No delay</span>
+      </button>
+
+      <button class="tool" id="close" type="button" title="Cancel (Esc)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+          <path d="M6 6l12 12M18 6L6 18" />
+        </svg>
+      </button>
+    </div>
+
+    <div id="hint"></div>
+
     <script type="module" src="/src/overlay.ts"></script>
   </body>
 </html>

@@ -31,12 +31,16 @@ one is fixed in behaviour rather than in presentation:
 
 ## Features
 
-- **Three capture modes** — full screen (per display or the entire desktop),
-  active window, and click-and-drag region.
+- **One way in** — press the shortcut anywhere, or use the tray. The screen
+  freezes and a toolbar appears; the mode is chosen there, not beforehand.
+- **Four modes** — rectangle, freeform lasso, window, and full screen, plus a
+  capture delay for grabbing menus and hover states.
 - **Automatic saving** — with the naming pattern, folder and file format you
   configured. Nothing is ever overwritten.
-- **Multi-monitor aware** — region selections can span two displays with
-  different DPI scaling and still come out pixel-correct.
+- **Browsable history** — every capture, searchable and filterable, rebuilt by
+  scanning the folder so a lost index can never lose a capture.
+- **Multi-monitor aware** — selections can span two displays with different DPI
+  scaling and still come out pixel-correct.
 - **Local only** — no account, no login, no cloud, no telemetry. Your captures
   never leave your machine.
 
@@ -95,9 +99,19 @@ A short tour of the parts worth knowing about:
 - **`src-tauri/src/naming.rs`** — filename generation. Never returns a path that
   already exists, and never fails.
 
-- **`src/overlay.ts`** — the region-selection overlay. The screen is frozen in
-  Rust *before* the overlay appears, so the overlay can never end up in its own
-  capture, and nothing moving underneath can change what gets saved mid-drag.
+- **`src/overlay.ts`** — the capture overlay. The screen is frozen in Rust
+  *before* the overlay appears, so the overlay can never end up in its own
+  capture, nothing moving underneath can change what gets saved mid-drag, and a
+  delayed capture can catch an open menu without the overlay closing it.
+
+- **`src-tauri/src/capture/mask.rs`** — freeform lasso masking, via a scanline
+  fill rather than a per-pixel point-in-polygon test. The naive version is
+  O(pixels x edges), which on a real lasso is hundreds of millions of operations
+  while the user waits.
+
+- **`src-tauri/src/history.rs`** — history is rebuilt by scanning the save
+  folder. The sidecar index only adds what the filesystem cannot know, so
+  deleting it costs metadata rather than captures.
 
 ### Known limitation
 
@@ -110,11 +124,12 @@ callers.
 
 ## Roadmap
 
-- [x] Capture engine — full screen, active window, region; auto-save and auto-naming
-- [ ] History and gallery
+- [x] Capture engine — auto-save and auto-naming that cannot lose a capture
+- [x] Overlay capture flow — rectangle, freeform, window, full screen, delay timer
+- [x] Tray and global shortcuts
+- [x] History and gallery
 - [ ] Annotation — pen, arrows, shapes, text, blur, crop, undo/redo
 - [ ] Pinned always-on-top windows
-- [ ] Tray behaviour and global shortcuts
 - [ ] Settings screen
 - [ ] Visual design pass
 - [ ] Inno Setup installer with first-run configuration

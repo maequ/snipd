@@ -301,8 +301,11 @@ pub fn monitors() -> Vec<MonitorInfo> {
     });
 
     for (index, monitor) in monitors.iter_mut().enumerate() {
+        // Plain ASCII punctuation on purpose: this label is written into the
+        // history index and read back by tooling that may not agree about
+        // encoding, and a mojibaked em dash is not worth the typography.
         monitor.label = format!(
-            "Display {} — {} x {}{}",
+            "Display {} - {} x {}{}",
             index + 1,
             monitor.width,
             monitor.height,
@@ -502,10 +505,49 @@ pub fn capture_virtual_desktop() -> Result<Frame, CaptureError> {
 }
 
 /// A top-level window we could capture.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WindowTarget {
     pub bounds: Bounds,
     pub title: String,
+}
+
+/// Every capturable top-level window, topmost first.
+///
+/// The overlay uses this to highlight whichever window is under the cursor in
+/// window mode. Z-order matters: overlapping windows mean the *first* match for
+/// a point is the one the user is actually pointing at.
+///
+/// This is deliberately enumerated before the overlay is shown. Once the overlay
+/// exists it is the topmost window on screen, and while `is_capturable` already
+/// filters out our own process, snapshotting first also keeps the highlight
+/// stable for the whole session rather than re-querying on every mouse move.
+pub fn capturable_windows() -> Vec<WindowTarget> {
+    let desktop = virtual_desktop().as_rect();
+    let mut targets = Vec::new();
+
+    unsafe {
+        let mut current = GetTopWindow(None).unwrap_or_default();
+        while !current.is_invalid() {
+            if is_capturable(current) {
+                if let Some(mut target) = describe_window(current) {
+                    // A maximised window overhangs the work area slightly, and a
+                    // window can be dragged half off-screen. Clip so the
+                    // highlight never implies pixels we cannot read.
+                    if let Some(clipped) = target.bounds.intersect(desktop) {
+                        target.bounds = clipped;
+                        targets.push(target);
+                    }
+                }
+            }
+            current = match GetWindow(current, GW_HWNDNEXT) {
+                Ok(next) => next,
+                Err(_) => break,
+            };
+        }
+    }
+
+    targets
 }
 
 /// Find the window the user means by "the active window".

@@ -15,6 +15,7 @@
 //! history index cannot be written, the user still has their screenshot, and the
 //! problem is reported alongside a successful result rather than instead of one.
 
+pub mod mask;
 pub mod win;
 
 use std::fs::File;
@@ -37,6 +38,8 @@ pub enum CaptureKind {
     FullScreen,
     ActiveWindow,
     Region,
+    /// A hand-drawn lasso selection. Always has a transparent margin.
+    Freeform,
 }
 
 /// What the caller wants captured.
@@ -121,19 +124,23 @@ pub fn save_frame(
         ));
     }
 
+    // A freeform capture carries real transparency, and JPEG cannot represent
+    // it — saving one as JPEG would fill the cut-away margin with black. PNG is
+    // therefore forced for those, whatever the configured default is.
+    let format = if kind == CaptureKind::Freeform {
+        ImageFormat::Png
+    } else {
+        settings.format
+    };
+
     let resolved = naming::resolve(NameRequest {
         dir: &dir,
         naming: &settings.naming,
-        extension: settings.format.extension(),
+        extension: format.extension(),
         taken_at,
     });
 
-    let bytes = encode_to_disk(
-        &frame.image,
-        &resolved.path,
-        settings.format,
-        settings.jpeg_quality,
-    )?;
+    let bytes = encode_to_disk(&frame.image, &resolved.path, format, settings.jpeg_quality)?;
 
     // The capture is now safe. Nothing below may return Err.
 
@@ -163,7 +170,7 @@ pub fn save_frame(
 
     let (width, height) = frame.image.dimensions();
 
-    Ok(CaptureRecord {
+    let record = CaptureRecord {
         id: format!("{}-{}", taken_at.format("%Y%m%d%H%M%S%3f"), width ^ height),
         path: resolved.path.to_string_lossy().into_owned(),
         file_name: resolved
@@ -179,7 +186,20 @@ pub fn save_frame(
         bytes,
         copied_to_clipboard: copied,
         warnings,
-    })
+    };
+
+    // --- History index ---------------------------------------------------
+    // Enrichment only. History is rebuilt by scanning the save folder, so a
+    // failure here costs this capture its mode label in the grid -- it does not
+    // cost the capture.
+    let mut record = record;
+    if let Err(err) = crate::history::record(&record) {
+        record
+            .warnings
+            .push(format!("Could not update the history index: {err}"));
+    }
+
+    Ok(record)
 }
 
 /// Read the pixels for a request, and describe where they came from.
@@ -293,4 +313,35 @@ fn encode_to_disk(
 
     let bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
     Ok(bytes)
+}
+
+/// Encode a frozen frame as JPEG, purely so the overlay has a backdrop to draw.
+///
+/// This is display-only and never reaches a saved file: the overlay shows this,
+/// but the pixels that actually get written come from cropping the lossless
+/// frame still held in memory. That separation is what lets the backdrop be
+/// cheap — JPEG encodes a full desktop in tens of milliseconds where PNG takes
+/// several hundred, and the overlay needs to appear instantly to feel right.
+pub fn encode_preview(image: &RgbaImage) -> Result<Vec<u8>, String> {
+    use image::codecs::jpeg::JpegEncoder;
+
+    let mut rgb = Vec::with_capacity(image.width() as usize * image.height() as usize * 3);
+    for pixel in image.pixels() {
+        rgb.extend_from_slice(&pixel.0[..3]);
+    }
+
+    let mut buffer = Vec::new();
+    // 82 is comfortably past the point where compression artefacts are visible
+    // at 1:1 on screen content, and keeps a 4K desktop well under a megabyte.
+    let mut encoder = JpegEncoder::new_with_quality(&mut buffer, 82);
+    encoder
+        .encode(
+            &rgb,
+            image.width(),
+            image.height(),
+            ExtendedColorType::Rgb8,
+        )
+        .map_err(|e| format!("encoding overlay backdrop: {e}"))?;
+
+    Ok(buffer)
 }
