@@ -44,6 +44,11 @@ arboard = "3"
 
 thiserror = "2"
 
+# The editor hands back a finished PNG. Base64 over the IPC bridge is ~1.33x the
+# raw size; a Vec<u8> parameter would be serialised as a JSON array of numbers,
+# which is roughly 4x and markedly slower to parse.
+base64 = "0.22"
+
 # Direct Win32 access for the capture backend. See src/capture/win.rs for why
 # this is preferred over a cross-platform capture crate.
 [target.'cfg(windows)'.dependencies.windows]

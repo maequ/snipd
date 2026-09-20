@@ -113,6 +113,14 @@ A short tour of the parts worth knowing about:
   folder. The sidecar index only adds what the filesystem cannot know, so
   deleting it costs metadata rather than captures.
 
+- **`src/editor.tsx`** — annotation. Edits are a list of shapes in *image*
+  coordinates, and the canvas is redrawn from scratch on every change. That is
+  what makes undo and redo trivially correct — there is no accumulated pixel
+  state to unwind, only a shorter list to redraw — and it means the canvas can
+  be displayed at any size without affecting the export. Saving always writes a
+  **copy**: the original was auto-saved the instant it was taken, and an edit is
+  not allowed to destroy the one thing the app promises never to lose.
+
 ### Known limitation
 
 The capture backend reads the desktop that DWM has composited, which covers
@@ -128,7 +136,7 @@ callers.
 - [x] Overlay capture flow — rectangle, freeform, window, full screen, delay timer
 - [x] Tray and global shortcuts
 - [x] History and gallery
-- [ ] Annotation — pen, arrows, shapes, text, blur, crop, undo/redo
+- [x] Annotation — pen, arrows, shapes, text, redaction, crop, undo/redo
 - [ ] Pinned always-on-top windows
 - [ ] Settings screen
 - [ ] Visual design pass

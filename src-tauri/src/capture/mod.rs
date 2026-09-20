@@ -40,6 +40,8 @@ pub enum CaptureKind {
     Region,
     /// A hand-drawn lasso selection. Always has a transparent margin.
     Freeform,
+    /// An annotated copy saved from the editor.
+    Edited,
 }
 
 /// What the caller wants captured.
@@ -127,7 +129,7 @@ pub fn save_frame(
     // A freeform capture carries real transparency, and JPEG cannot represent
     // it — saving one as JPEG would fill the cut-away margin with black. PNG is
     // therefore forced for those, whatever the configured default is.
-    let format = if kind == CaptureKind::Freeform {
+    let format = if kind == CaptureKind::Freeform || kind == CaptureKind::Edited {
         ImageFormat::Png
     } else {
         settings.format

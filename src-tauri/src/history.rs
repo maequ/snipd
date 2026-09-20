@@ -365,6 +365,12 @@ pub fn resolve_thumbnail_key(key: &str, save_directory: &Path) -> Option<PathBuf
     None
 }
 
+/// The thumbnail key for a file as it exists right now.
+pub fn key_for(path: &Path) -> Option<String> {
+    let metadata = fs::metadata(path).ok()?;
+    Some(thumbnail_key(&path.to_string_lossy(), modified_ms(&metadata)))
+}
+
 fn remember_key(key: &str, path: &Path) {
     if let Ok(mut cache) = key_cache().lock() {
         cache.insert(key.to_string(), path.to_path_buf());

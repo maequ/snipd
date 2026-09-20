@@ -131,6 +131,14 @@ export default function History({ refreshToken }: { refreshToken: number }) {
     return () => observer.disconnect();
   }, [entries.length, total, loading, fetchPage]);
 
+  const open = useCallback(async (path: string) => {
+    try {
+      await invoke("open_editor", { path });
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
   const copy = useCallback(async (path: string) => {
     try {
       await invoke("copy_capture", { path });
@@ -203,9 +211,14 @@ export default function History({ refreshToken }: { refreshToken: number }) {
           <ul className="grid">
             {entries.map((entry) => (
               <li key={entry.path} className="tile">
-                <div className="tile__image">
+                <button
+                  type="button"
+                  className="tile__image"
+                  title="Open in the editor"
+                  onClick={() => void open(entry.path)}
+                >
                   <img src={entry.thumbnailUrl} alt={entry.fileName} loading="lazy" />
-                </div>
+                </button>
 
                 <div className="tile__meta">
                   <p className="tile__name" title={entry.fileName}>

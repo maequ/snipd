@@ -316,10 +316,14 @@ where
     match &outcome {
         Ok(record) => {
             let _ = app.emit("capture-complete", record);
-            // The brief calls for the editor to come up straight after a
-            // capture. The window was hidden to keep it out of the shot, so it
-            // has to be brought back deliberately.
-            crate::tray::show_main_window(app);
+            // The brief calls for the editing screen to come up straight after
+            // a capture. The file is already safely on disk, so if the editor
+            // cannot open, that is a nuisance rather than a lost capture -- fall
+            // back to the library instead of failing.
+            if let Err(err) = crate::show_editor(app, std::path::PathBuf::from(&record.path)) {
+                eprintln!("[editor] could not open after capture: {err}");
+                crate::tray::show_main_window(app);
+            }
         }
         Err(message) => {
             let _ = app.emit("capture-failed", message);

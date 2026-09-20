@@ -41,6 +41,8 @@ pub struct AppState {
     pub session: Mutex<Option<CaptureSession>>,
     /// Shortcuts that could not be bound at startup, for Settings to surface.
     pub shortcut_warnings: Mutex<Vec<String>>,
+    /// The capture currently open in the editor window.
+    pub editing: Mutex<Option<std::path::PathBuf>>,
 }
 
 /// A capture taken without showing the overlay.
@@ -186,6 +188,130 @@ fn copy_capture(path: String) -> Result<(), String> {
     clipboard::copy_image(&image).map(|_| ())
 }
 
+/// What the editor window needs to load a capture.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EditorState {
+    file_name: String,
+    /// Served by the image protocol rather than a file:// path, so the editor
+    /// needs no filesystem access of its own.
+    image_url: String,
+}
+
+/// Open a capture in the annotation editor.
+///
+/// One editor window is reused rather than spawning one per capture: a grid of
+/// hundreds of thumbnails is very easy to click twice, and a pile of stacked
+/// editor windows is not what anyone wants from that.
+#[tauri::command]
+fn open_editor(app: AppHandle, path: String) -> Result<(), String> {
+    show_editor(&app, std::path::PathBuf::from(&path))
+}
+
+/// Open a capture in the editor.
+///
+/// Shared by the library's click handler and by the post-capture flow, since the
+/// brief calls for the editing screen to appear straight after a capture.
+pub fn show_editor(app: &AppHandle, target: std::path::PathBuf) -> Result<(), String> {
+    if !target.exists() {
+        return Err(format!("{} no longer exists", target.display()));
+    }
+
+    {
+        let state = app.state::<AppState>();
+        let mut editing = state
+            .editing
+            .lock()
+            .map_err(|_| "editor lock poisoned".to_string())?;
+        *editing = Some(target);
+    }
+
+    if let Some(window) = app.get_webview_window("editor") {
+        // Already open: point it at the new capture and bring it forward.
+        let _ = window.emit("editor-load", ());
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
+    tauri::WebviewWindowBuilder::new(
+        app,
+        "editor",
+        tauri::WebviewUrl::App("editor.html".into()),
+    )
+    .title("Snipd editor")
+    .inner_size(1100.0, 780.0)
+    .min_inner_size(640.0, 480.0)
+    .center()
+    .build()
+    .map_err(|e| format!("could not open the editor: {e}"))?;
+
+    Ok(())
+}
+
+/// Tell the editor which capture to show.
+#[tauri::command]
+fn editor_state(state: State<'_, AppState>) -> Result<EditorState, String> {
+    let path = state
+        .editing
+        .lock()
+        .map_err(|_| "editor lock poisoned".to_string())?
+        .clone()
+        .ok_or_else(|| "nothing is open in the editor".to_string())?;
+
+    let directory = save_directory(&state)?;
+    let key = history::key_for(&path).ok_or_else(|| "capture is unreadable".to_string())?;
+    // Warm the cache so the protocol handler can answer without a folder scan.
+    let _ = history::resolve_thumbnail_key(&key, &directory);
+
+    Ok(EditorState {
+        file_name: path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        image_url: format!(
+            "http://{}.localhost/full?k={key}",
+            overlay::FRAME_SCHEME
+        ),
+    })
+}
+
+/// Save an annotated copy of the capture currently being edited.
+///
+/// Deliberately a *copy*. The original capture was auto-saved the instant it was
+/// taken and is the one thing this app promises never to lose, so an edit must
+/// not be able to destroy it.
+#[tauri::command]
+fn save_edited(png: String, state: State<'_, AppState>) -> Result<CaptureRecord, String> {
+    use base64::Engine;
+
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(png.as_bytes())
+        .map_err(|e| format!("the edited image was not valid base64: {e}"))?;
+
+    let image = image::load_from_memory(&bytes)
+        .map_err(|e| format!("the edited image could not be decoded: {e}"))?
+        .to_rgba8();
+
+    let frame = capture::win::Frame {
+        image,
+        origin: (0, 0),
+    };
+
+    let mut settings = state
+        .settings
+        .lock()
+        .map_err(|_| "settings lock poisoned".to_string())?;
+
+    capture::save_frame(
+        frame,
+        capture::CaptureKind::Edited,
+        Some("Edited".to_string()),
+        &mut settings,
+    )
+}
+
 /// Read the configured save folder without holding the lock any longer than needed.
 fn save_directory(state: &State<'_, AppState>) -> Result<std::path::PathBuf, String> {
     state
@@ -213,27 +339,51 @@ fn serve_image(
     path: &str,
     query: Option<&str>,
 ) -> tauri::http::Response<Vec<u8>> {
-    let bytes = match path {
-        "/backdrop" => overlay::serve_backdrop(app).map(|b| b.as_ref().clone()),
-        "/thumb" => query
-            .and_then(|q| query_param(q, "k"))
-            .and_then(|key| {
-                let directory = app
-                    .state::<AppState>()
-                    .settings
-                    .lock()
-                    .ok()
-                    .map(|s| s.save_directory.clone())?;
-                history::resolve_thumbnail_key(&key, &directory)
-            })
-            .and_then(|file| history::thumbnail(&file).ok()),
-        _ => None,
+    let resolved = query
+        .and_then(|q| query_param(q, "k"))
+        .and_then(|key| {
+            let directory = app
+                .state::<AppState>()
+                .settings
+                .lock()
+                .ok()
+                .map(|s| s.save_directory.clone())?;
+            history::resolve_thumbnail_key(&key, &directory)
+        });
+
+    let (bytes, mime) = match path {
+        "/backdrop" => (
+            overlay::serve_backdrop(app).map(|b| b.as_ref().clone()),
+            "image/jpeg",
+        ),
+        "/thumb" => (
+            resolved.and_then(|file| history::thumbnail(&file).ok()),
+            "image/jpeg",
+        ),
+        // The editor needs the real pixels, not a thumbnail of them.
+        "/full" => match resolved {
+            Some(file) => {
+                let mime = if file
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e.eq_ignore_ascii_case("png"))
+                    .unwrap_or(false)
+                {
+                    "image/png"
+                } else {
+                    "image/jpeg"
+                };
+                (std::fs::read(&file).ok(), mime)
+            }
+            None => (None, "image/png"),
+        },
+        _ => (None, "image/jpeg"),
     };
 
     let builder = tauri::http::Response::builder();
     match bytes {
         Some(body) => builder
-            .header("Content-Type", "image/jpeg")
+            .header("Content-Type", mime)
             // Keys already change when a file does, but this removes any chance
             // of a stale frame or thumbnail surviving in the webview cache.
             .header("Cache-Control", "no-store")
@@ -290,6 +440,7 @@ pub fn run() {
             settings: Mutex::new(settings),
             session: Mutex::new(None),
             shortcut_warnings: Mutex::new(Vec::new()),
+            editing: Mutex::new(None),
         })
         // Serves the overlay's frozen backdrop straight from memory. Going via
         // disk or base64-over-IPC would both add a visible delay before the
@@ -365,6 +516,9 @@ pub fn run() {
             history_list,
             history_delete,
             copy_capture,
+            open_editor,
+            editor_state,
+            save_edited,
             overlay::begin_capture,
             overlay::overlay_state,
             overlay::capture_rect,
