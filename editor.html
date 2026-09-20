@@ -7,6 +7,30 @@
   </head>
   <body>
     <div id="root"></div>
+
+    <!--
+      A classic (non-module) script, so it runs even if the module bundle is
+      blocked or fails to parse. If the editor is still showing this message a
+      few seconds after opening, the bundle never executed -- which is a very
+      different problem from it executing and throwing, and impossible to tell
+      apart from a blank white window.
+    -->
+    <script>
+      (function () {
+        var root = document.getElementById("root");
+        root.innerHTML =
+          '<div style="padding:24px;font:13px/1.6 system-ui,sans-serif;color:#888">Loading the editor…</div>';
+        window.setTimeout(function () {
+          if (root.dataset.mounted === "yes") return;
+          root.innerHTML =
+            '<div style="padding:24px;font:13px/1.6 system-ui,sans-serif;color:#c0392b">' +
+            "<strong>The editor script did not run.</strong><br>" +
+            "The page loaded but its bundle never executed." +
+            "</div>";
+        }, 4000);
+      })();
+    </script>
+
     <script type="module" src="/src/editor.tsx"></script>
   </body>
 </html>

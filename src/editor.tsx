@@ -569,7 +569,13 @@ window.addEventListener("error", (event) => showFatal(event.error ?? event.messa
 window.addEventListener("unhandledrejection", (event) => showFatal(event.reason));
 
 try {
-  createRoot(document.getElementById("root") as HTMLElement).render(
+  const mount = document.getElementById("root") as HTMLElement;
+  // Tells the inline fallback in editor.html that the bundle did run, so it
+  // does not overwrite the app with its "script did not run" message.
+  mount.dataset.mounted = "yes";
+  mount.textContent = "";
+
+  createRoot(mount).render(
     <StrictMode>
       <Editor />
     </StrictMode>,
@@ -577,3 +583,4 @@ try {
 } catch (err) {
   showFatal(err);
 }
+

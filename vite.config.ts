@@ -15,6 +15,12 @@ export default defineConfig(() => ({
   plugins: [react()],
 
   build: {
+    // Tauri serves the app over a custom protocol, where Vite's `modulepreload`
+    // links and their `crossorigin` attribute trigger CORS-checked fetches that
+    // can be rejected outright -- the script then never executes and the window
+    // renders blank, with no error to catch. The preloads are only a latency
+    // optimisation for a page loading from a real network, which this is not.
+    modulePreload: false,
     rollupOptions: {
       // The region-selection overlay is a separate top-level window with its own
       // document, so it needs its own entry point rather than being a route
