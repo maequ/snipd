@@ -70,7 +70,14 @@ function filterFrom(filter: DateFilter): number | null {
   return start.getTime() - days * 24 * 60 * 60 * 1000;
 }
 
-export default function History({ refreshToken }: { refreshToken: number }) {
+export default function History({
+  refreshToken,
+  onEdit,
+}: {
+  refreshToken: number;
+  /** Hand a capture to the editor, which lives in the main window. */
+  onEdit: (entry: HistoryEntry) => void;
+}) {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
@@ -133,14 +140,6 @@ export default function History({ refreshToken }: { refreshToken: number }) {
     observer.observe(node);
     return () => observer.disconnect();
   }, [entries.length, total, loading, fetchPage]);
-
-  const open = useCallback(async (path: string) => {
-    try {
-      await invoke("open_editor", { path });
-    } catch (err) {
-      setError(String(err));
-    }
-  }, []);
 
   const pin = useCallback(async (path: string) => {
     try {
@@ -286,7 +285,7 @@ export default function History({ refreshToken }: { refreshToken: number }) {
           entry={viewing}
           onClose={() => setViewing(null)}
           onEdit={() => {
-            void open(viewing.path);
+            onEdit(viewing);
             setViewing(null);
           }}
           onCopy={() => void copy(viewing.path)}

@@ -10,7 +10,8 @@ import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import History from "./History";
+import History, { type HistoryEntry } from "./History";
+import Editor from "./editor";
 import SettingsPanel, { type Settings } from "./Settings";
 import "./App.css";
 
@@ -37,6 +38,15 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [refreshToken, setRefreshToken] = useState(0);
+  /**
+   * The capture open in the editor.
+   *
+   * The editor is a view in this window rather than a window of its own: a
+   * separately created window would not load its bundle at all, rendering
+   * blank, and this side-steps that entirely while also keeping the app to a
+   * single window.
+   */
+  const [editing, setEditing] = useState<HistoryEntry | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -85,6 +95,20 @@ export default function App() {
       setError(String(err));
     }
   }, []);
+
+  if (editing) {
+    return (
+      <Editor
+        imageUrl={editing.fullUrl}
+        fileName={editing.fileName}
+        onClose={() => {
+          setEditing(null);
+          // A saved copy is a new capture, so the library needs refetching.
+          setRefreshToken((token) => token + 1);
+        }}
+      />
+    );
+  }
 
   return (
     <main className="app">
@@ -139,7 +163,7 @@ export default function App() {
       )}
 
       {tab === "library" ? (
-        <History refreshToken={refreshToken} />
+        <History refreshToken={refreshToken} onEdit={setEditing} />
       ) : settings ? (
         <SettingsPanel initial={settings} onSaved={setSettings} />
       ) : (

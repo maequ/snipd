@@ -14,13 +14,18 @@
  * allowed to overwrite it.
  */
 
-import { StrictMode, useCallback, useEffect, useRef, useState } from "react";
-import { createRoot } from "react-dom/client";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import "./editor.css";
+
+export interface EditorProps {
+  /** Image to edit, served by the app's image protocol. */
+  imageUrl: string;
+  fileName: string;
+  /** Return to the library. */
+  onClose: () => void;
+}
 
 interface Pt {
   x: number;
@@ -36,11 +41,6 @@ type Shape =
   | { t: "ellipse"; a: Pt; b: Pt; color: string; w: number; fill: boolean }
   | { t: "text"; p: Pt; text: string; color: string; size: number }
   | { t: "redact"; a: Pt; b: Pt };
-
-interface EditorState {
-  fileName: string;
-  imageUrl: string;
-}
 
 const COLORS = ["#e5484d", "#f5a524", "#2f9e44", "#2f5fd8", "#111318", "#ffffff"];
 const WIDTHS = [2, 4, 7, 12];
@@ -162,11 +162,10 @@ function drawShape(ctx: CanvasRenderingContext2D, s: Shape): void {
   ctx.restore();
 }
 
-function Editor() {
+export default function Editor({ imageUrl, fileName, onClose }: EditorProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
 
-  const [meta, setMeta] = useState<EditorState | null>(null);
   const [shapes, setShapes] = useState<Shape[]>([]);
   const [redo, setRedo] = useState<Shape[]>([]);
   const [tool, setTool] = useState<Tool>("pen");
@@ -230,43 +229,28 @@ function Editor() {
     render();
   }, [render]);
 
-  /** Load (or reload) the capture being edited. */
-  const load = useCallback(async () => {
-    try {
-      const state = await invoke<EditorState>("editor_state");
-      setMeta(state);
-      setShapes([]);
-      setRedo([]);
-      setCrop(null);
-      setStatus(null);
-
-      const img = new Image();
-      img.onload = () => {
-        const canvas = canvasRef.current;
-        if (canvas) {
-          canvas.width = img.naturalWidth;
-          canvas.height = img.naturalHeight;
-        }
-        imageRef.current = img;
-        // Triggers the paint effect. Calling `render` directly here would make
-        // this callback depend on it, which is the cycle described above.
-        setImageVersion((v) => v + 1);
-      };
-      img.onerror = () => setStatus("That capture could not be loaded.");
-      img.src = state.imageUrl;
-    } catch (err) {
-      setStatus(String(err));
-    }
-  }, []);
-
+  // Load whenever a different capture is opened.
   useEffect(() => {
-    void load();
-    // The window is reused, so opening a second capture re-fires this.
-    const un = listen("editor-load", () => void load());
-    return () => {
-      void un.then((f) => f());
+    setShapes([]);
+    setRedo([]);
+    setCrop(null);
+    setStatus(null);
+
+    const img = new Image();
+    img.onload = () => {
+      const canvas = canvasRef.current;
+      if (canvas) {
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+      }
+      imageRef.current = img;
+      // Triggers the paint effect. Calling `render` directly here would make
+      // this effect depend on it, which is the cycle described above.
+      setImageVersion((v) => v + 1);
     };
-  }, [load]);
+    img.onerror = () => setStatus("That capture could not be loaded.");
+    img.src = imageUrl;
+  }, [imageUrl]);
 
   /** Screen point to image point. The canvas is displayed scaled to fit. */
   const toImage = useCallback((e: React.MouseEvent): Pt => {
@@ -374,11 +358,11 @@ function Editor() {
         if (e.shiftKey) redoLast();
         else undo();
       }
-      if (e.key === "Escape") void getCurrentWindow().close();
+      if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redoLast, typing]);
+  }, [undo, redoLast, typing, onClose]);
 
   /** Flatten to a PNG, honouring the crop rectangle if one is set. */
   const exportPng = useCallback(async (): Promise<string | null> => {
@@ -490,6 +474,9 @@ function Editor() {
         </div>
 
         <div className="bar__group bar__group--end">
+          <button type="button" onClick={onClose}>
+            Back to library
+          </button>
           <button type="button" className="primary" onClick={() => void save()} disabled={busy}>
             {busy ? "Saving…" : "Save a copy"}
           </button>
@@ -531,56 +518,7 @@ function Editor() {
         </div>
       </div>
 
-      <p className="filename">{meta?.fileName ?? "Loading…"}</p>
+      <p className="filename">{fileName}</p>
     </div>
   );
 }
-
-/**
- * Put a failure on screen instead of leaving a blank white window.
- *
- * A window that renders nothing is the least useful bug report possible — it
- * looks identical whether the script failed to load, threw while mounting, or
- * was denied a permission. Surfacing the message costs a few lines and turns
- * "it's broken" into something diagnosable.
- */
-function showFatal(detail: unknown): void {
-  const root = document.getElementById("root");
-  if (!root) return;
-
-  const text =
-    detail instanceof Error
-      ? `${detail.name}: ${detail.message}\n\n${detail.stack ?? ""}`
-      : String(detail);
-
-  root.textContent = "";
-  const box = document.createElement("div");
-  box.style.cssText = "padding:24px;font:13px/1.6 system-ui,sans-serif;color:#c0392b";
-  const title = document.createElement("strong");
-  title.textContent = "The editor could not start.";
-  const pre = document.createElement("pre");
-  pre.style.cssText = "white-space:pre-wrap;word-break:break-word;margin-top:12px;color:inherit";
-  pre.textContent = text;
-  box.append(title, pre);
-  root.append(box);
-}
-
-window.addEventListener("error", (event) => showFatal(event.error ?? event.message));
-window.addEventListener("unhandledrejection", (event) => showFatal(event.reason));
-
-try {
-  const mount = document.getElementById("root") as HTMLElement;
-  // Tells the inline fallback in editor.html that the bundle did run, so it
-  // does not overwrite the app with its "script did not run" message.
-  mount.dataset.mounted = "yes";
-  mount.textContent = "";
-
-  createRoot(mount).render(
-    <StrictMode>
-      <Editor />
-    </StrictMode>,
-  );
-} catch (err) {
-  showFatal(err);
-}
-
