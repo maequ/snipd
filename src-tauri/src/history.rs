@@ -55,6 +55,8 @@ pub struct HistoryEntry {
     pub source: Option<String>,
     /// URL the grid points an `<img>` at.
     pub thumbnail_url: String,
+    /// Full-resolution image, for the viewer. Same key, different route.
+    pub full_url: String,
 }
 
 /// Filters applied by the history search bar.
@@ -198,6 +200,10 @@ pub fn list(query: &HistoryQuery, save_directory: &Path) -> Result<HistoryPage, 
         entries.push(HistoryEntry {
             thumbnail_url: format!(
                 "http://{}.localhost/thumb?k={key}",
+                crate::overlay::FRAME_SCHEME
+            ),
+            full_url: format!(
+                "http://{}.localhost/full?k={key}",
                 crate::overlay::FRAME_SCHEME
             ),
             path: path_string,

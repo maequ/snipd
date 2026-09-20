@@ -15,6 +15,7 @@ pub mod config;
 pub mod history;
 pub mod naming;
 pub mod overlay;
+pub mod pin;
 pub mod shortcuts;
 pub mod tray;
 
@@ -43,6 +44,8 @@ pub struct AppState {
     pub shortcut_warnings: Mutex<Vec<String>>,
     /// The capture currently open in the editor window.
     pub editing: Mutex<Option<std::path::PathBuf>>,
+    /// Which capture each pinned window is showing, keyed by window label.
+    pub pins: pin::PinRegistry,
 }
 
 /// A capture taken without showing the overlay.
@@ -312,6 +315,82 @@ fn save_edited(png: String, state: State<'_, AppState>) -> Result<CaptureRecord,
     )
 }
 
+/// Replace the settings and act on anything that has side effects.
+///
+/// Shortcuts are re-registered here rather than only at startup, so changing a
+/// hotkey takes effect immediately instead of at the next launch. The returned
+/// warnings describe any that could not be bound.
+#[tauri::command]
+fn update_settings(
+    app: AppHandle,
+    settings: Settings,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    let mut incoming = settings;
+    // Clamp anything nonsensical before it is persisted, so a hand-edited or
+    // mistyped value cannot put the app into a broken state.
+    incoming.normalise();
+
+    let shortcuts = incoming.shortcuts.clone();
+    let launch_on_login = incoming.startup.launch_on_login;
+
+    incoming.save()?;
+    // Create the new folder now rather than discovering at capture time that it
+    // is unusable.
+    let _ = incoming.ensure_save_directory();
+
+    {
+        let mut current = state
+            .settings
+            .lock()
+            .map_err(|_| "settings lock poisoned".to_string())?;
+        *current = incoming;
+    }
+
+    let warnings = shortcuts::apply(&app, &shortcuts);
+    if let Ok(mut slot) = state.shortcut_warnings.lock() {
+        *slot = warnings.clone();
+    }
+
+    if let Err(err) = set_launch_on_login(launch_on_login) {
+        eprintln!("[startup] {err}");
+    }
+
+    Ok(warnings)
+}
+
+/// Add or remove the Run-key entry that starts Snipd at login.
+///
+/// The registry Run key is used rather than a Startup-folder shortcut because it
+/// takes arguments cleanly — `--autostart` is what tells the app that "start
+/// minimised" applies to this launch, as opposed to the user opening it.
+fn set_launch_on_login(enabled: bool) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let command = format!("\"{}\" {}", exe.display(), AUTOSTART_FLAG);
+
+    let action = if enabled {
+        format!(
+            "New-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' \
+             -Name 'Snipd' -Value '{command}' -PropertyType String -Force | Out-Null"
+        )
+    } else {
+        "Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' \
+         -Name 'Snipd' -ErrorAction SilentlyContinue"
+            .to_string()
+    };
+
+    let status = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &action])
+        .status()
+        .map_err(|e| format!("could not update the startup entry: {e}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err("the startup entry could not be updated".to_string())
+    }
+}
+
 /// Read the configured save folder without holding the lock any longer than needed.
 fn save_directory(state: &State<'_, AppState>) -> Result<std::path::PathBuf, String> {
     state
@@ -434,13 +513,21 @@ pub fn run() {
     let start_hidden = launched_at_login && settings.startup.start_minimised;
 
     tauri::Builder::default()
+        // Must be registered first, before any window exists: a second launch
+        // is intercepted here and simply focuses the copy already running,
+        // rather than starting a rival that cannot claim the global shortcuts.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            tray::show_main_window(app);
+        }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(AppState {
             settings: Mutex::new(settings),
             session: Mutex::new(None),
             shortcut_warnings: Mutex::new(Vec::new()),
             editing: Mutex::new(None),
+            pins: Mutex::new(std::collections::HashMap::new()),
         })
         // Serves the overlay's frozen backdrop straight from memory. Going via
         // disk or base64-over-IPC would both add a visible delay before the
@@ -519,6 +606,10 @@ pub fn run() {
             open_editor,
             editor_state,
             save_edited,
+            update_settings,
+            pin::pin_capture,
+            pin::pin_state,
+            pin::close_pin,
             overlay::begin_capture,
             overlay::overlay_state,
             overlay::capture_rect,

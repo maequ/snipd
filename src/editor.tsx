@@ -536,8 +536,44 @@ function Editor() {
   );
 }
 
-createRoot(document.getElementById("root") as HTMLElement).render(
-  <StrictMode>
-    <Editor />
-  </StrictMode>,
-);
+/**
+ * Put a failure on screen instead of leaving a blank white window.
+ *
+ * A window that renders nothing is the least useful bug report possible — it
+ * looks identical whether the script failed to load, threw while mounting, or
+ * was denied a permission. Surfacing the message costs a few lines and turns
+ * "it's broken" into something diagnosable.
+ */
+function showFatal(detail: unknown): void {
+  const root = document.getElementById("root");
+  if (!root) return;
+
+  const text =
+    detail instanceof Error
+      ? `${detail.name}: ${detail.message}\n\n${detail.stack ?? ""}`
+      : String(detail);
+
+  root.textContent = "";
+  const box = document.createElement("div");
+  box.style.cssText = "padding:24px;font:13px/1.6 system-ui,sans-serif;color:#c0392b";
+  const title = document.createElement("strong");
+  title.textContent = "The editor could not start.";
+  const pre = document.createElement("pre");
+  pre.style.cssText = "white-space:pre-wrap;word-break:break-word;margin-top:12px;color:inherit";
+  pre.textContent = text;
+  box.append(title, pre);
+  root.append(box);
+}
+
+window.addEventListener("error", (event) => showFatal(event.error ?? event.message));
+window.addEventListener("unhandledrejection", (event) => showFatal(event.reason));
+
+try {
+  createRoot(document.getElementById("root") as HTMLElement).render(
+    <StrictMode>
+      <Editor />
+    </StrictMode>,
+  );
+} catch (err) {
+  showFatal(err);
+}

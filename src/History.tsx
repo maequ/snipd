@@ -19,6 +19,7 @@ export interface HistoryEntry {
   kind: "fullScreen" | "activeWindow" | "region" | "freeform" | null;
   source: string | null;
   thumbnailUrl: string;
+  fullUrl: string;
 }
 
 interface HistoryPage {
@@ -77,6 +78,8 @@ export default function History({ refreshToken }: { refreshToken: number }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  /** The capture open in the viewer, if any. */
+  const [viewing, setViewing] = useState<HistoryEntry | null>(null);
 
   // Debounced so typing in the search box does not fire a request per keystroke.
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -134,6 +137,14 @@ export default function History({ refreshToken }: { refreshToken: number }) {
   const open = useCallback(async (path: string) => {
     try {
       await invoke("open_editor", { path });
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
+  const pin = useCallback(async (path: string) => {
+    try {
+      await invoke("pin_capture", { path });
     } catch (err) {
       setError(String(err));
     }
@@ -214,8 +225,8 @@ export default function History({ refreshToken }: { refreshToken: number }) {
                 <button
                   type="button"
                   className="tile__image"
-                  title="Open in the editor"
-                  onClick={() => void open(entry.path)}
+                  title="View this capture"
+                  onClick={() => setViewing(entry)}
                 >
                   <img src={entry.thumbnailUrl} alt={entry.fileName} loading="lazy" />
                 </button>
@@ -269,6 +280,110 @@ export default function History({ refreshToken }: { refreshToken: number }) {
           </div>
         </>
       )}
+
+      {viewing && (
+        <Viewer
+          entry={viewing}
+          onClose={() => setViewing(null)}
+          onEdit={() => {
+            void open(viewing.path);
+            setViewing(null);
+          }}
+          onCopy={() => void copy(viewing.path)}
+          onReveal={() => void reveal(viewing.path)}
+          onPin={() => {
+            void pin(viewing.path);
+            setViewing(null);
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+/** Full-size preview of one capture, with what to do next. */
+function Viewer({
+  entry,
+  onClose,
+  onEdit,
+  onCopy,
+  onReveal,
+  onPin,
+}: {
+  entry: HistoryEntry;
+  onClose: () => void;
+  onEdit: () => void;
+  onCopy: () => void;
+  onReveal: () => void;
+  onPin: () => void;
+}) {
+  // Escape closes, as it does in every image viewer.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    // Clicking the backdrop closes; clicks inside the panel must not bubble up
+    // to it, or choosing a button would dismiss the viewer.
+    <div className="viewer" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="viewer__panel" onClick={(e) => e.stopPropagation()}>
+        <div className="viewer__stage">
+          <img src={entry.fullUrl} alt={entry.fileName} />
+        </div>
+
+        <div className="viewer__side">
+          <p className="viewer__name">{entry.fileName}</p>
+
+          <dl className="viewer__facts">
+            <dt>Taken</dt>
+            <dd>{formatWhen(entry.takenAtMs)}</dd>
+
+            <dt>Mode</dt>
+            <dd>{entry.kind ? (KIND_LABELS[entry.kind] ?? entry.kind) : "Unknown"}</dd>
+
+            {entry.width && entry.height ? (
+              <>
+                <dt>Size</dt>
+                <dd>
+                  {entry.width} x {entry.height} px
+                </dd>
+              </>
+            ) : null}
+
+            <dt>File</dt>
+            <dd>{formatBytes(entry.bytes)}</dd>
+
+            {entry.source ? (
+              <>
+                <dt>Source</dt>
+                <dd>{entry.source}</dd>
+              </>
+            ) : null}
+          </dl>
+
+          <div className="viewer__actions">
+            <button type="button" className="primary" onClick={onEdit}>
+              Open in editor
+            </button>
+            <button type="button" onClick={onPin}>
+              Pin on top
+            </button>
+            <button type="button" onClick={onCopy}>
+              Copy to clipboard
+            </button>
+            <button type="button" onClick={onReveal}>
+              Show in folder
+            </button>
+            <button type="button" onClick={onClose}>
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

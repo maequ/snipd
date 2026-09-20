@@ -277,9 +277,112 @@ button.danger {
   cursor: pointer;
 }
 
-.tile__image:hover {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
+/* Hovering anywhere over a capture highlights the whole card, not just the
+   thumbnail, so the entire tile reads as one clickable object. */
+.tile:hover {
+  border-color: var(--accent);
+  background: var(--surface-sunken);
+}
+
+.tile:hover .tile__image {
+  background: transparent;
+}
+
+/* --- viewer --- */
+
+.viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  background: rgba(8, 10, 14, 0.72);
+}
+
+.viewer__panel {
+  display: flex;
+  gap: 0;
+  max-width: 1100px;
+  max-height: 100%;
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.viewer__stage {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: var(--surface-sunken);
+}
+
+.viewer__stage img {
+  max-width: 100%;
+  /* Bounded so a tall capture cannot push the panel past the window. */
+  max-height: 70vh;
+  object-fit: contain;
+  display: block;
+}
+
+.viewer__side {
+  width: 260px;
+  flex: none;
+  padding: 18px;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+}
+
+.viewer__name {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  word-break: break-all;
+}
+
+.viewer__facts {
+  display: grid;
+  grid-template-columns: 62px 1fr;
+  gap: 6px 10px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.viewer__facts dt {
+  color: var(--text-muted);
+}
+
+.viewer__facts dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+.viewer__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: auto;
+}
+
+@media (max-width: 720px) {
+  .viewer__panel {
+    flex-direction: column;
+  }
+
+  .viewer__side {
+    width: auto;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
 }
 
 .tile__image img {
@@ -320,4 +423,219 @@ button.danger {
 .tile__actions button {
   padding: 5px 9px;
   font-size: 12px;
+}
+
+/* ------------------------------------------------------------------
+   Explicit theme override.
+
+   The media query above handles "Match Windows". These blocks come after
+   it so a deliberate Light or Dark choice wins regardless of the OS
+   setting. Keep the variable lists in sync with the two blocks above.
+   ------------------------------------------------------------------ */
+
+:root[data-theme="light"] {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --surface-sunken: #eceef1;
+  --border: #d9dde3;
+  --text: #191d23;
+  --text-muted: #5a626e;
+  --accent: #2f5fd8;
+  --accent-text: #ffffff;
+  --ok-bg: #edf6ee;
+  --ok-border: #b6d8bb;
+  --ok-text: #1e5128;
+  --warn-bg: #fdf5e6;
+  --warn-border: #e3c88a;
+  --warn-text: #7a5510;
+  --error-bg: #fdf1f1;
+  --error-border: #e2b2b2;
+  --error-text: #8a1f1f;
+}
+
+:root[data-theme="dark"] {
+  --bg: #131519;
+  --surface: #1b1e24;
+  --surface-sunken: #23272e;
+  --border: #2e333c;
+  --text: #e7e9ec;
+  --text-muted: #9aa2ae;
+  --accent: #6f9bff;
+  --accent-text: #0d1016;
+  --ok-bg: #16251a;
+  --ok-border: #2f5136;
+  --ok-text: #a8d9b0;
+  --warn-bg: #2a2214;
+  --warn-border: #5b4a26;
+  --warn-text: #e5c682;
+  --error-bg: #2a1919;
+  --error-border: #5a2e2e;
+  --error-text: #f0b4b4;
+}
+
+/* --- tabs --- */
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tabs button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 8px 14px;
+}
+
+.tabs button:hover {
+  color: var(--text);
+}
+
+.tabs button[aria-pressed="true"] {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* --- settings --- */
+
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  max-width: 720px;
+}
+
+.settings__group {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 16px 18px;
+}
+
+.settings__group h2 {
+  margin: 0 0 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.settings__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 7px 0;
+}
+
+.settings__label {
+  width: 170px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings__label small {
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.settings__control {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings__control input[type="text"],
+.settings__control input[type="number"],
+.settings__control select {
+  width: 100%;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.settings__inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings__inline input[type="range"] {
+  flex: 1;
+}
+
+.settings__value {
+  color: var(--text-muted);
+  font-size: 12px;
+  min-width: 34px;
+}
+
+.settings__preview {
+  display: inline-block;
+  padding: 5px 9px;
+  border-radius: 5px;
+  background: var(--surface-sunken);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.settings__toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 6px 0;
+  cursor: pointer;
+}
+
+.settings__toggle input {
+  margin: 2px 0 0;
+  flex: none;
+}
+
+.settings__note {
+  margin: 0 0 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.settings__note code,
+.settings__row code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface-sunken);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11.5px;
+}
+
+.settings__warn {
+  margin: 8px 0 0;
+  color: var(--warn-text);
+  font-size: 12px;
+}
+
+.settings__footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  position: sticky;
+  bottom: 0;
+  padding: 12px 0;
+  background: var(--bg);
+}
+
+.settings__status {
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.settings a {
+  color: var(--accent);
+  word-break: break-all;
 }
