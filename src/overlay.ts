@@ -74,11 +74,12 @@ const DELAY_STEPS = [0, 3, 5, 10];
  */
 const DELAY_COMMIT_MS = 800;
 
+/** Every hint names the way out, so the overlay can never feel like a trap. */
 const HINTS: Record<Mode, string> = {
-  rectangle: "Drag to select an area",
-  freeform: "Draw around what you want to keep",
-  window: "Click a window to capture it",
-  fullscreen: "Click a display to capture it",
+  rectangle: "Drag to select an area  ·  Esc or right-click to cancel",
+  freeform: "Draw around what you want to keep  ·  Esc to cancel",
+  window: "Click a window to capture it  ·  Esc to cancel",
+  fullscreen: "Click a display to capture it  ·  Esc to cancel",
 };
 
 const backdrop = document.getElementById("backdrop") as HTMLImageElement;
@@ -376,10 +377,20 @@ async function commitFreeform(points: Array<{ x: number; y: number }>): Promise<
 // Input
 // ---------------------------------------------------------------------------
 
-function onMouseDown(event: MouseEvent): void {
+function onMouseDown(event: PointerEvent): void {
   if (event.button !== 0 || settled || !ready) return;
   // Clicks on the toolbar are its own business.
   if (toolbar.contains(event.target as Node)) return;
+
+  // Capture the pointer for the whole gesture. Without this, a pointer-up that
+  // happens while another window has grabbed input is simply never delivered —
+  // and the overlay then sits frozen mid-selection with the screen covered,
+  // which is the worst possible failure for a fullscreen always-on-top window.
+  try {
+    document.documentElement.setPointerCapture(event.pointerId);
+  } catch {
+    // Capture is an optimisation, not a requirement; carry on without it.
+  }
 
   // Re-measure at the moment of use. Cheap, and it means a display being
   // rescaled or rearranged mid-session cannot leave a stale scale factor behind.
@@ -402,7 +413,7 @@ function onMouseDown(event: MouseEvent): void {
   }
 }
 
-function onMouseMove(event: MouseEvent): void {
+function onMouseMove(event: PointerEvent): void {
   if (settled || !ready) return;
 
   if (!dragging) {
@@ -436,9 +447,15 @@ function onMouseMove(event: MouseEvent): void {
   );
 }
 
-function onMouseUp(event: MouseEvent): void {
+function onMouseUp(event: PointerEvent): void {
   if (!dragging || event.button !== 0) return;
   dragging = false;
+
+  try {
+    document.documentElement.releasePointerCapture(event.pointerId);
+  } catch {
+    // Already released, or never captured.
+  }
 
   if (mode === "freeform") {
     if (lassoPoints.length < 3) {
@@ -536,10 +553,27 @@ async function start(): Promise<void> {
   delayButton.addEventListener("click", onDelayClick);
   closeButton.addEventListener("click", () => void cancel());
 
-  window.addEventListener("mousedown", onMouseDown);
-  window.addEventListener("mousemove", onMouseMove);
-  window.addEventListener("mouseup", onMouseUp);
+  // Pointer events rather than mouse events, so the gesture can be captured
+  // and a lost release cannot strand the overlay on screen.
+  window.addEventListener("pointerdown", onMouseDown);
+  window.addEventListener("pointermove", onMouseMove);
+  window.addEventListener("pointerup", onMouseUp);
+  // Fires if the OS takes the pointer away mid-drag — a system gesture, the
+  // task switcher, a UAC prompt. Treat it as a release rather than hanging.
+  window.addEventListener("pointercancel", onMouseUp);
   window.addEventListener("keydown", onKeyDown);
+
+  // Last-resort escape hatch. If the overlay somehow ends up without focus, it
+  // is no longer usable but is still covering the entire screen, so it should
+  // get out of the way rather than trap the user.
+  window.addEventListener("blur", () => {
+    if (settled) return;
+    // Deferred: focus can flicker briefly as the overlay is being shown, and
+    // cancelling on that would close it before the user ever sees it.
+    window.setTimeout(() => {
+      if (!settled && !document.hasFocus()) void cancel();
+    }, 400);
+  });
   window.addEventListener("contextmenu", (event) => {
     event.preventDefault();
     void cancel();
