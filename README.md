@@ -61,7 +61,7 @@ leave your machine.
 ## Installing
 
 Download `Snipd-Setup-x.y.z.exe` from
-[Releases](https://github.com/snipd-app/snipd/releases) and run it. The installer
+[Releases](https://github.com/maequ/snipd/releases) and run it. The installer
 asks where to save captures, how to name them, which format to use, and whether
 to copy to the clipboard and start with Windows — and the app honours all of it
 on first launch.

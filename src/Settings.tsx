@@ -44,7 +44,7 @@ export interface Settings {
   retention: { enabled: boolean; days: number };
 }
 
-const GITHUB_URL = "https://github.com/snipd-app/snipd";
+const GITHUB_URL = "https://github.com/maequ/snipd";
 const APP_VERSION = "0.1.0";
 
 type Section = "capture" | "saving" | "recording" | "shortcuts" | "about";

@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "A screenshot tool for Windows that never loses a capture"
 authors = ["Snipd Contributors"]
 license = "MIT"
-repository = "https://github.com/snipd-app/snipd"
+repository = "https://github.com/maequ/snipd"
 edition = "2021"
 
 [lib]

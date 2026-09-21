@@ -18,4 +18,4 @@ pub const DATA_DIR_NAME: &str = "Snipd";
 pub const DEFAULT_SAVE_SUBDIR: &str = "Snipd";
 
 /// Shown in the Settings > About section and the README.
-pub const GITHUB_URL: &str = "https://github.com/snipd-app/snipd";
+pub const GITHUB_URL: &str = "https://github.com/maequ/snipd";

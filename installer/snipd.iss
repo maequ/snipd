@@ -20,7 +20,7 @@
 #define AppName       "Snipd"
 #define AppVersion    "0.1.0"
 #define AppPublisher  "Snipd Contributors"
-#define AppUrl        "https://github.com/snipd-app/snipd"
+#define AppUrl        "https://github.com/maequ/snipd"
 #define AppExe        "snipd.exe"
 
 [Setup]
