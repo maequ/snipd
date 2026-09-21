@@ -120,6 +120,22 @@ begin
   if Value then Result := 'true' else Result := 'false';
 end;
 
+{ Where captures go unless the user picks somewhere else.
+
+  Inno has no constant for the Pictures folder, so this asks the shell for it —
+  CSIDL 39 is CSIDL_MYPICTURES. Going through the shell rather than assuming
+  %USERPROFILE%\Pictures means a relocated Pictures folder is respected, which
+  is also how the app itself resolves it. }
+function DefaultSaveFolder: string;
+var
+  Pictures: string;
+begin
+  Pictures := GetShellFolderByCSIDL(39, False);
+  if Pictures = '' then
+    Pictures := ExpandConstant('{%USERPROFILE}\Pictures');
+  Result := AddBackslash(Pictures) + 'Snipd';
+end;
+
 function ChosenExtension: string;
 begin
   { Page C has not necessarily been visited yet when the preview is first
@@ -174,7 +190,7 @@ begin
     'so nothing is ever lost. You can change this later in Settings.',
     False, '');
   SaveDirPage.Add('');
-  SaveDirPage.Values[0] := ExpandConstant('{userpics}\Snipd');
+  SaveDirPage.Values[0] := DefaultSaveFolder;
 
   { Page B — naming. Built by hand rather than with CreateInputOptionPage so the
     prefix box and the live preview can sit with the radio buttons. }

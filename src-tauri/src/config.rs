@@ -333,7 +333,19 @@ impl Settings {
 
     fn read_from(path: &Path) -> Result<Self, String> {
         let raw = fs::read_to_string(path).map_err(|e| e.to_string())?;
-        let mut settings: Settings = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+        Self::from_json(&raw)
+    }
+
+    /// Parse settings JSON, tolerating a leading byte-order mark.
+    ///
+    /// Installers and text editors routinely write UTF-8 with a BOM. It is valid
+    /// UTF-8, so reading the file succeeds, but `serde_json` sees the mark as a
+    /// stray character before the opening brace and rejects the whole document.
+    /// The failure mode is silent and total — the seed is skipped and every
+    /// choice made in the installer is quietly discarded.
+    pub fn from_json(raw: &str) -> Result<Self, String> {
+        let trimmed = raw.trim_start_matches('\u{feff}').trim_start();
+        let mut settings: Settings = serde_json::from_str(trimmed).map_err(|e| e.to_string())?;
         settings.normalise();
         Ok(settings)
     }
@@ -413,5 +425,65 @@ fn quarantine(path: &Path) {
     let target = path.with_file_name(format!("config.corrupt-{stamp}.json"));
     if let Err(err) = fs::rename(path, &target) {
         eprintln!("[config] could not quarantine bad config: {err}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Exactly what the Inno Setup wizard writes. If this ever fails to parse,
+    /// the installer's answers are silently ignored and every choice the user
+    /// made in the wizard is thrown away — so it is worth pinning down.
+    const INSTALLER_SEED: &str = r#"{
+  "version": 1,
+  "saveDirectory": "C:\\Users\\example\\Pictures\\Snipd",
+  "format": "jpeg",
+  "naming": {
+    "mode": "prefix",
+    "prefix": "SeedTest",
+    "counter": 42
+  },
+  "clipboard": { "autoCopy": false },
+  "startup": {
+    "launchOnLogin": false,
+    "startMinimised": false
+  }
+}
+"#;
+
+    #[test]
+    fn the_installer_seed_parses() {
+        let settings: Settings =
+            serde_json::from_str(INSTALLER_SEED).expect("installer seed must deserialise");
+
+        assert_eq!(settings.format, ImageFormat::Jpeg);
+        assert_eq!(settings.naming.mode, NamingMode::Prefix);
+        assert_eq!(settings.naming.prefix, "SeedTest");
+        assert_eq!(settings.naming.counter, 42);
+        assert!(!settings.clipboard.auto_copy);
+        assert!(!settings.startup.launch_on_login);
+    }
+
+    #[test]
+    fn fields_the_seed_omits_fall_back_to_defaults() {
+        let settings: Settings = serde_json::from_str(INSTALLER_SEED).unwrap();
+
+        // The wizard does not ask about these, so they must come from defaults
+        // rather than being left empty.
+        assert_eq!(settings.theme, Theme::System);
+        assert!(!settings.shortcuts.capture.is_empty());
+        assert_eq!(settings.naming.counter_padding, 3);
+        assert!(settings.window.close_to_tray);
+    }
+
+    /// Installers and text editors routinely emit a UTF-8 byte-order mark.
+    /// `serde_json` treats it as a stray character and refuses the whole
+    /// document, so it has to be stripped before parsing.
+    #[test]
+    fn a_byte_order_mark_does_not_defeat_the_seed() {
+        let with_bom = format!("\u{feff}{INSTALLER_SEED}");
+        let settings = Settings::from_json(&with_bom).expect("a BOM must be tolerated");
+        assert_eq!(settings.naming.prefix, "SeedTest");
     }
 }

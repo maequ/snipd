@@ -65,11 +65,33 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Reveal and focus the main window, un-minimising it if needed.
+/// Reveal and focus the main window, recreating it if it is gone.
+///
+/// The recreation path is not a nicety. Closing the window only hides it while
+/// "keep Snipd in the tray" is on; with that setting off the window is destroyed
+/// for real, and the app carries on running in the tray. Without rebuilding it
+/// here, every route back — the tray icon, the tray menu, a second launch — would
+/// silently do nothing, and the app would be running with no way to ever show a
+/// window again. That looks exactly like "it won't open".
 pub fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
+        return;
+    }
+
+    match tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
+        .title("Snipd")
+        .inner_size(980.0, 760.0)
+        .min_inner_size(520.0, 420.0)
+        .center()
+        .build()
+    {
+        Ok(window) => {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+        Err(err) => eprintln!("[window] could not recreate the main window: {err}"),
     }
 }
