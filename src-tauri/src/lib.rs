@@ -343,7 +343,18 @@ struct EditorTarget {
 /// does, and leave whatever you already had open alone.
 #[tauri::command]
 fn open_editor(app: AppHandle, path: String, reviewing: bool) -> Result<(), String> {
-    let target = std::path::PathBuf::from(&path);
+    open_editor_window(&app, &path, reviewing)
+}
+
+/// Open the editor window. The command above and the capture path both use this.
+///
+/// Rust drives this rather than the frontend asking for it. The main window is
+/// deliberately left hidden when a capture is going to open in the editor, and
+/// WebView2 suspends a hidden webview — so an event handler living in that
+/// window may simply never run. Anything that must happen after a capture has
+/// to be driven from here, where nothing can be asleep.
+pub fn open_editor_window(app: &AppHandle, path: &str, reviewing: bool) -> Result<(), String> {
+    let target = std::path::PathBuf::from(path);
     if !target.exists() {
         return Err(format!("{path} no longer exists"));
     }
@@ -371,7 +382,7 @@ fn open_editor(app: AppHandle, path: String, reviewing: bool) -> Result<(), Stri
     }
 
     tauri::WebviewWindowBuilder::new(
-        &app,
+        app,
         EDITOR_LABEL,
         tauri::WebviewUrl::App("editor.html".into()),
     )

@@ -105,11 +105,9 @@ export default function App() {
       setSaved(null);
       setRefreshToken((token) => token + 1);
 
-      // The capture is already on disk either way. Reviewing only decides
-      // whether an editor opens on it first.
-      if (settings?.capture.after === "review") {
-        void openEditor(record.path, true);
-      }
+      // Opening the editor is Rust's job, not this window's. This window is
+      // hidden while reviewing, and a hidden webview can be suspended, so it
+      // cannot be relied on to react to anything.
     });
 
     const failed = listen<string>("capture-failed", (event) => setError(event.payload));
@@ -144,7 +142,7 @@ export default function App() {
       void recorded.then((un) => un());
       void edited.then((un) => un());
     };
-  }, [settings, openEditor]);
+  }, [settings]);
 
   const newCapture = useCallback(async () => {
     setError(null);

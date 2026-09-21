@@ -324,13 +324,20 @@ where
         Ok(record) => {
             crate::announce_capture(app, record);
 
-            // The main window is only brought back when nothing else is about
-            // to take its place. It was hidden so it would stay out of the
-            // shot, and when the capture is going to open in the editor window
-            // the library appearing as well is just a second window nobody
-            // asked for — which is exactly how taking one screenshot ended up
-            // feeling like the whole application had opened.
-            if !reviews_captures(app) {
+            // Opening the editor is done here rather than by the main window
+            // reacting to the capture event. That window is deliberately left
+            // hidden in this case, and WebView2 suspends a hidden webview, so
+            // an event handler inside it is not guaranteed to run at all.
+            if reviews_captures(app) {
+                if let Err(err) = crate::open_editor_window(app, &record.path, true) {
+                    // Falling back to the library is better than a capture that
+                    // appears to have gone nowhere.
+                    eprintln!("[editor] {err}");
+                    crate::tray::show_main_window(app);
+                }
+            } else {
+                // Nothing else is going to appear, so the window that was
+                // hidden to stay out of the shot comes back.
                 crate::tray::show_main_window(app);
             }
         }
