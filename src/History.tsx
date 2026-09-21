@@ -20,6 +20,8 @@ export interface HistoryEntry {
   source: string | null;
   thumbnailUrl: string;
   fullUrl: string;
+  isVideo: boolean;
+  durationMs: number | null;
 }
 
 interface HistoryPage {
@@ -37,7 +39,16 @@ const KIND_LABELS: Record<string, string> = {
   activeWindow: "Window",
   region: "Region",
   freeform: "Freeform",
+  edited: "Edited",
+  recording: "Recording",
 };
+
+/** `2:07` — recordings are short enough that hours never come up. */
+function formatDuration(ms: number | null): string {
+  if (!ms) return "";
+  const total = Math.round(ms / 1000);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
 
 const DATE_LABELS: Record<DateFilter, string> = {
   all: "All time",
@@ -73,10 +84,13 @@ function filterFrom(filter: DateFilter): number | null {
 export default function History({
   refreshToken,
   onEdit,
+  media,
 }: {
   refreshToken: number;
   /** Hand a capture to the editor, which lives in the main window. */
   onEdit: (entry: HistoryEntry) => void;
+  /** Which tab this is: stills or recordings. */
+  media: "image" | "video";
 }) {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [total, setTotal] = useState(0);
@@ -106,6 +120,7 @@ export default function History({
             toMs: null,
             offset,
             limit: PAGE_SIZE,
+            media,
           },
         });
         setTotal(page.total);
@@ -117,7 +132,7 @@ export default function History({
         setLoading(false);
       }
     },
-    [debouncedSearch, dateFilter],
+    [debouncedSearch, dateFilter, media],
   );
 
   // Filters changing resets to the first page; refreshToken bumps after a new
@@ -206,15 +221,33 @@ export default function History({
 
       {!loading && entries.length === 0 ? (
         <p className="library__empty">
-          {search || dateFilter !== "all"
-            ? "No captures match those filters."
-            : "No captures yet. Everything you capture appears here automatically."}
+          {search || dateFilter !== "all" ? (
+            <>No {media === "video" ? "recordings" : "captures"} match those filters.</>
+          ) : media === "video" ? (
+            <>
+              No recordings yet.
+              <br />
+              <span className="library__teach">
+                Open the capture overlay, choose <strong>Record</strong>, then drag the area you
+                want.
+              </span>
+            </>
+          ) : (
+            <>
+              No captures yet.
+              <br />
+              <span className="library__teach">
+                Press <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>S</kbd> anywhere, or use the tray
+                icon. Everything you capture is saved here automatically.
+              </span>
+            </>
+          )}
         </p>
       ) : (
         <>
           <p className="library__count">
             {entries.length === total
-              ? `${total} capture${total === 1 ? "" : "s"}`
+              ? `${total} ${media === "video" ? "recording" : "capture"}${total === 1 ? "" : "s"}`
               : `Showing ${entries.length} of ${total}`}
           </p>
 
@@ -224,10 +257,19 @@ export default function History({
                 <button
                   type="button"
                   className="tile__image"
-                  title="View this capture"
+                  title={entry.isVideo ? "Play this recording" : "View this capture"}
                   onClick={() => setViewing(entry)}
                 >
-                  <img src={entry.thumbnailUrl} alt={entry.fileName} loading="lazy" />
+                  {entry.isVideo ? (
+                    <span className="tile__video">
+                      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M8 5.5v13l11-6.5z" />
+                      </svg>
+                      <span>{formatDuration(entry.durationMs) || "Recording"}</span>
+                    </span>
+                  ) : (
+                    <img src={entry.thumbnailUrl} alt={entry.fileName} loading="lazy" />
+                  )}
                 </button>
 
                 <div className="tile__meta">
@@ -331,7 +373,13 @@ function Viewer({
     <div className="viewer" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="viewer__panel" onClick={(e) => e.stopPropagation()}>
         <div className="viewer__stage">
-          <img src={entry.fullUrl} alt={entry.fileName} />
+          {entry.isVideo ? (
+            <video src={entry.fullUrl} controls autoPlay className="viewer__video" />
+          ) : (
+            // The frame matters: a capture that is a single flat colour is
+            // indistinguishable from a failed load without a visible boundary.
+            <img className="viewer__image" src={entry.fullUrl} alt={entry.fileName} />
+          )}
         </div>
 
         <div className="viewer__side">
@@ -343,6 +391,13 @@ function Viewer({
 
             <dt>Mode</dt>
             <dd>{entry.kind ? (KIND_LABELS[entry.kind] ?? entry.kind) : "Unknown"}</dd>
+
+            {entry.durationMs ? (
+              <>
+                <dt>Length</dt>
+                <dd>{formatDuration(entry.durationMs)}</dd>
+              </>
+            ) : null}
 
             {entry.width && entry.height ? (
               <>
@@ -365,15 +420,19 @@ function Viewer({
           </dl>
 
           <div className="viewer__actions">
-            <button type="button" className="primary" onClick={onEdit}>
-              Open in editor
-            </button>
-            <button type="button" onClick={onPin}>
-              Pin on top
-            </button>
-            <button type="button" onClick={onCopy}>
-              Copy to clipboard
-            </button>
+            {!entry.isVideo && (
+              <>
+                <button type="button" className="primary" onClick={onEdit}>
+                  Open in editor
+                </button>
+                <button type="button" onClick={onPin}>
+                  Pin on top
+                </button>
+                <button type="button" onClick={onCopy}>
+                  Copy to clipboard
+                </button>
+              </>
+            )}
             <button type="button" onClick={onReveal}>
               Show in folder
             </button>

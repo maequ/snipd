@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Snipd recording</title>
+    <style>
+      /*
+       * The floating recorder bar: elapsed time and a way to stop.
+       *
+       * Deliberately small and always on top. A recording with no visible way to
+       * end it is how people fill a disk, so this never hides.
+       *
+       * Fixed dark colours rather than theme tokens, because it floats over
+       * whatever is being recorded and has to stay legible regardless.
+       */
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+        user-select: none;
+        -webkit-user-select: none;
+        font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+      }
+
+      #bar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        height: 100%;
+        padding: 0 10px 0 14px;
+        background: #1a1a1e;
+        border: 1px solid #2d2d34;
+        border-radius: 10px;
+        cursor: move;
+      }
+
+      #dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #e5484d;
+        flex: none;
+        /* The one animated thing in the app that runs continuously, because a
+           recording indicator that does not move is easy to stop noticing. */
+        animation: pulse 1.6s ease-in-out infinite;
+      }
+
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.25; }
+      }
+
+      /* Respect a user who has asked the OS for less motion. */
+      @media (prefers-reduced-motion: reduce) {
+        #dot { animation: none; }
+      }
+
+      #elapsed {
+        font-size: 15px;
+        font-variant-numeric: tabular-nums;
+        color: #ffffff;
+        letter-spacing: 0.01em;
+        min-width: 58px;
+      }
+
+      #detail {
+        font-size: 11px;
+        color: #8e8e93;
+        flex: 1;
+        white-space: nowrap;
+      }
+
+      #stop {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 7px 12px;
+        border: 0;
+        border-radius: 6px;
+        background: #ffffff;
+        color: #121214;
+        font: inherit;
+        font-size: 12.5px;
+        font-weight: 500;
+        cursor: pointer;
+        flex: none;
+      }
+
+      #stop:hover {
+        background: #e8e8ea;
+      }
+
+      #stop svg {
+        width: 11px;
+        height: 11px;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="bar" data-tauri-drag-region>
+      <div id="dot"></div>
+      <span id="elapsed">0:00</span>
+      <span id="detail"></span>
+      <button id="stop" type="button">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <rect x="5" y="5" width="14" height="14" rx="2" />
+        </svg>
+        Stop
+      </button>
+    </div>
+    <script type="module" src="/src/recorder.ts"></script>
+  </body>
+</html>

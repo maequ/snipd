@@ -60,7 +60,7 @@ interface OverlayState {
   initialMode: string;
 }
 
-type Mode = "rectangle" | "freeform" | "window" | "fullscreen";
+type Mode = "rectangle" | "freeform" | "window" | "fullscreen" | "record";
 
 /** Ignore drags smaller than this in physical pixels; they are misclicks. */
 const MIN_SELECTION_PX = 5;
@@ -80,6 +80,7 @@ const HINTS: Record<Mode, string> = {
   freeform: "Draw around what you want to keep  ·  Esc to cancel",
   window: "Click a window to capture it  ·  Esc to cancel",
   fullscreen: "Click a display to capture it  ·  Esc to cancel",
+  record: "Drag the area to record  ·  Esc to cancel",
 };
 
 const backdrop = document.getElementById("backdrop") as HTMLImageElement;
@@ -504,7 +505,33 @@ function onMouseUp(event: PointerEvent): void {
   }
 
   hideReticle();
+
+  if (mode === "record") {
+    void beginRecording({ x: start.x, y: start.y, width, height });
+    return;
+  }
+
   void commitRect({ x: start.x, y: start.y, width, height }, "region", null);
+}
+
+/**
+ * Hand the selected area to the recorder.
+ *
+ * Rust closes this overlay before recording starts — it covers the whole
+ * screen, so recording with it still up would capture the overlay rather than
+ * what is behind it.
+ */
+async function beginRecording(bounds: Bounds): Promise<void> {
+  if (settled) return;
+  settled = true;
+  try {
+    await invoke("start_recording_from_overlay", { bounds });
+  } catch (err) {
+    console.error("start_recording_from_overlay failed", err);
+    // Put the overlay away rather than leaving it covering the screen after a
+    // failure the user cannot act on from here.
+    void invoke("cancel_capture").catch(() => undefined);
+  }
 }
 
 function onKeyDown(event: KeyboardEvent): void {
@@ -520,6 +547,7 @@ function onKeyDown(event: KeyboardEvent): void {
     "2": "freeform",
     "3": "window",
     "4": "fullscreen",
+    "5": "record",
   };
   const target = shortcuts[event.key];
   if (target) {

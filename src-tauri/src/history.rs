@@ -32,8 +32,11 @@ use serde::{Deserialize, Serialize};
 use crate::capture::{CaptureKind, CaptureRecord};
 use crate::config;
 
-/// Extensions treated as captures when scanning the save folder.
+/// Extensions treated as still captures when scanning the save folder.
 const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg"];
+
+/// Extensions treated as recordings.
+const VIDEO_EXTENSIONS: &[&str] = &["mp4"];
 
 /// Longest edge of a cached thumbnail, in pixels. Comfortably sharp on a
 /// high-DPI display at the grid's tile size without costing much to decode.
@@ -53,10 +56,15 @@ pub struct HistoryEntry {
     pub height: Option<u32>,
     pub kind: Option<CaptureKind>,
     pub source: Option<String>,
-    /// URL the grid points an `<img>` at.
+    /// URL the grid points an `<img>` at. Empty for recordings, which have no
+    /// still to show.
     pub thumbnail_url: String,
-    /// Full-resolution image, for the viewer. Same key, different route.
+    /// Full-resolution image or the video itself, for the viewer.
     pub full_url: String,
+    /// Recordings are listed and handled differently from stills.
+    pub is_video: bool,
+    /// Recording length, when the index knew it.
+    pub duration_ms: Option<u64>,
 }
 
 /// Filters applied by the history search bar.
@@ -73,6 +81,9 @@ pub struct HistoryQuery {
     pub offset: Option<usize>,
     /// How many to return. Unbounded when absent.
     pub limit: Option<usize>,
+    /// `"image"`, `"video"`, or absent for everything. Backs the Library and
+    /// Recordings tabs without needing two different listing paths.
+    pub media: Option<String>,
 }
 
 /// A page of history, plus the total that matched.
@@ -174,7 +185,7 @@ pub fn list(query: &HistoryQuery, save_directory: &Path) -> Result<HistoryPage, 
 
     for item in dir.flatten() {
         let path = item.path();
-        if !is_image(&path) {
+        if !is_media(&path) {
             continue;
         }
 
@@ -197,11 +208,21 @@ pub fn list(query: &HistoryQuery, save_directory: &Path) -> Result<HistoryPage, 
         let key = thumbnail_key(&path_string, modified_ms(&metadata));
         remember_key(&key, &path);
 
+        let video = is_video(&path);
+
         entries.push(HistoryEntry {
-            thumbnail_url: format!(
-                "http://{}.localhost/thumb?k={key}",
-                crate::overlay::FRAME_SCHEME
-            ),
+            is_video: video,
+            duration_ms: record.and_then(|r| r.duration_ms),
+            // Recordings have no still to show, and decoding a video frame just
+            // to draw a grid tile is not worth it; the UI draws its own marker.
+            thumbnail_url: if video {
+                String::new()
+            } else {
+                format!(
+                    "http://{}.localhost/thumb?k={key}",
+                    crate::overlay::FRAME_SCHEME
+                )
+            },
             full_url: format!(
                 "http://{}.localhost/full?k={key}",
                 crate::overlay::FRAME_SCHEME
@@ -225,7 +246,14 @@ pub fn list(query: &HistoryQuery, save_directory: &Path) -> Result<HistoryPage, 
         .map(|s| s.trim().to_lowercase())
         .filter(|s| !s.is_empty());
 
+    let media = query.media.as_deref();
+
     entries.retain(|entry| {
+        match media {
+            Some("image") if entry.is_video => return false,
+            Some("video") if !entry.is_video => return false,
+            _ => {}
+        }
         if let Some(needle) = &search {
             if !entry.file_name.to_lowercase().contains(needle) {
                 return false;
@@ -244,7 +272,8 @@ pub fn list(query: &HistoryQuery, save_directory: &Path) -> Result<HistoryPage, 
         true
     });
 
-    entries.sort_by(|a, b| b.taken_at_ms.cmp(&a.taken_at_ms));
+    // Newest first, so `Reverse` rather than a comparator.
+    entries.sort_by_key(|entry| std::cmp::Reverse(entry.taken_at_ms));
 
     let total = entries.len();
     let offset = query.offset.unwrap_or(0).min(total);
@@ -259,11 +288,24 @@ pub fn list(query: &HistoryQuery, save_directory: &Path) -> Result<HistoryPage, 
     })
 }
 
-fn is_image(path: &Path) -> bool {
+fn has_extension(path: &Path, set: &[&str]) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
-        .map(|ext| IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
+        .map(|ext| set.contains(&ext.to_lowercase().as_str()))
         .unwrap_or(false)
+}
+
+fn is_image(path: &Path) -> bool {
+    has_extension(path, IMAGE_EXTENSIONS)
+}
+
+fn is_video(path: &Path) -> bool {
+    has_extension(path, VIDEO_EXTENSIONS)
+}
+
+/// Anything the library should list at all.
+fn is_media(path: &Path) -> bool {
+    is_image(path) || is_video(path)
 }
 
 /// Milliseconds since the epoch from an RFC 3339 timestamp.
@@ -356,7 +398,7 @@ pub fn resolve_thumbnail_key(key: &str, save_directory: &Path) -> Option<PathBuf
     let dir = fs::read_dir(save_directory).ok()?;
     for item in dir.flatten() {
         let path = item.path();
-        if !is_image(&path) {
+        if !is_media(&path) {
             continue;
         }
         let metadata = match item.metadata() {
@@ -371,16 +413,99 @@ pub fn resolve_thumbnail_key(key: &str, save_directory: &Path) -> Option<PathBuf
     None
 }
 
+/// URL the UI can fetch a saved file from, full size.
+///
+/// Registers the key as a side effect so the protocol handler can serve it
+/// without a folder scan — a freshly saved capture is very likely to be the next
+/// thing asked for.
+pub fn media_url(path: &Path) -> String {
+    match key_for(path) {
+        Some(key) => {
+            remember_key(&key, path);
+            format!(
+                "http://{}.localhost/full?k={key}",
+                crate::overlay::FRAME_SCHEME
+            )
+        }
+        None => String::new(),
+    }
+}
+
 /// The thumbnail key for a file as it exists right now.
 pub fn key_for(path: &Path) -> Option<String> {
     let metadata = fs::metadata(path).ok()?;
-    Some(thumbnail_key(&path.to_string_lossy(), modified_ms(&metadata)))
+    Some(thumbnail_key(
+        &path.to_string_lossy(),
+        modified_ms(&metadata),
+    ))
 }
 
 fn remember_key(key: &str, path: &Path) {
     if let Ok(mut cache) = key_cache().lock() {
         cache.insert(key.to_string(), path.to_path_buf());
     }
+}
+
+/// Totals for the library summary.
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryStats {
+    pub captures: usize,
+    pub recordings: usize,
+    pub bytes: u64,
+    /// Captured in the last seven days, so the strip says something even when
+    /// the totals barely move.
+    pub this_week: usize,
+    pub oldest_ms: Option<u64>,
+}
+
+/// Count what is in the save folder.
+///
+/// Computed by scanning rather than tracked incrementally: a counter would drift
+/// the moment anything touched the folder from outside, and the scan is cheap
+/// next to the thumbnail decoding that happens on the same screen.
+pub fn stats(save_directory: &Path) -> LibraryStats {
+    let mut stats = LibraryStats::default();
+
+    let week_ago = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+        .saturating_sub(7 * 24 * 60 * 60 * 1000);
+
+    let dir = match fs::read_dir(save_directory) {
+        Ok(dir) => dir,
+        Err(_) => return stats,
+    };
+
+    for item in dir.flatten() {
+        let path = item.path();
+        if !is_media(&path) {
+            continue;
+        }
+        let metadata = match item.metadata() {
+            Ok(metadata) if metadata.is_file() => metadata,
+            _ => continue,
+        };
+
+        if is_video(&path) {
+            stats.recordings += 1;
+        } else {
+            stats.captures += 1;
+        }
+        stats.bytes += metadata.len();
+
+        let when = modified_ms(&metadata);
+        if when >= week_ago {
+            stats.this_week += 1;
+        }
+        stats.oldest_ms = Some(match stats.oldest_ms {
+            Some(existing) => existing.min(when),
+            None => when,
+        });
+    }
+
+    stats
 }
 
 /// Delete captures older than `days`, returning how many went.
@@ -416,7 +541,7 @@ pub fn prune(save_directory: &Path, days: u32) -> Result<usize, String> {
     let mut removed = 0;
     for item in dir.flatten() {
         let path = item.path();
-        if !is_image(&path) {
+        if !is_media(&path) {
             continue;
         }
         let metadata = match item.metadata() {

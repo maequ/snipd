@@ -29,6 +29,7 @@ export default defineConfig(() => ({
         main: resolve(root, "index.html"),
         overlay: resolve(root, "overlay.html"),
         pin: resolve(root, "pin.html"),
+        recorder: resolve(root, "recorder.html"),
       },
     },
   },

@@ -72,6 +72,10 @@ features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_HiDpi",
     "Win32_System_Threading",
+    # Media Foundation supplies the H.264 encoder and MP4 muxer that ship with
+    # Windows, so recording needs no bundled ffmpeg and no extra licensing.
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
 ]
 
 [dev-dependencies]

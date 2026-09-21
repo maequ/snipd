@@ -186,7 +186,9 @@ impl Frame {
             height: self.image.height(),
         };
 
-        let clipped = area.intersect(frame_bounds).ok_or(CaptureError::EmptyArea)?;
+        let clipped = area
+            .intersect(frame_bounds)
+            .ok_or(CaptureError::EmptyArea)?;
 
         // Translate from virtual-screen space into this frame's pixel space.
         let local_x = (clipped.x - self.origin.0) as u32;
@@ -286,10 +288,7 @@ pub fn monitors() -> Vec<MonitorInfo> {
         );
     }
 
-    let mut monitors: Vec<MonitorInfo> = handles
-        .into_iter()
-        .filter_map(|h| describe_monitor(h))
-        .collect();
+    let mut monitors: Vec<MonitorInfo> = handles.into_iter().filter_map(describe_monitor).collect();
 
     // Primary first, then left-to-right, top-to-bottom. Stable ordering keeps
     // the "Display 1 / Display 2" labels from shuffling between launches.
@@ -379,6 +378,27 @@ fn describe_monitor(handle: HMONITOR) -> Option<MonitorInfo> {
 /// This is the single primitive every capture mode is built from. `area` is in
 /// virtual-screen coordinates and is clipped to the desktop before reading.
 pub fn capture_area(area: Bounds) -> Result<Frame, CaptureError> {
+    let (pixels, area) = grab(area, true)?;
+    let image = RgbaImage::from_raw(area.width, area.height, pixels)
+        .ok_or_else(|| CaptureError::Gdi("pixel buffer did not match image size".into()))?;
+    Ok(Frame {
+        image,
+        origin: (area.x, area.y),
+    })
+}
+
+/// Capture into a raw top-down BGRA buffer, exactly as GDI produces it.
+///
+/// Recording uses this rather than [`capture_area`]. Media Foundation wants
+/// BGRA, so going via `RgbaImage` would mean swapping every pixel into RGBA and
+/// straight back again — thirty times a second, for nothing.
+pub fn capture_area_bgra(area: Bounds) -> Result<(Vec<u8>, Bounds), CaptureError> {
+    grab(area, false)
+}
+
+/// Shared GDI grab. `swap_to_rgba` controls whether the BGRA bytes GDI returns
+/// are reordered on the way out.
+fn grab(area: Bounds, swap_to_rgba: bool) -> Result<(Vec<u8>, Bounds), CaptureError> {
     let desktop = virtual_desktop().as_rect();
     let area = area.intersect(desktop).ok_or(CaptureError::EmptyArea)?;
 
@@ -431,24 +451,18 @@ pub fn capture_area(area: Bounds) -> Result<Frame, CaptureError> {
 
         blit.map_err(|e| CaptureError::Gdi(format!("BitBlt failed: {e}")))?;
 
-        let pixels = read_bitmap_pixels(mem.0, bitmap.0, width, height)?;
-
-        let image = RgbaImage::from_raw(area.width, area.height, pixels)
-            .ok_or_else(|| CaptureError::Gdi("pixel buffer did not match image size".into()))?;
-
-        Ok(Frame {
-            image,
-            origin: (area.x, area.y),
-        })
+        let pixels = read_bitmap_pixels(mem.0, bitmap.0, width, height, swap_to_rgba)?;
+        Ok((pixels, area))
     }
 }
 
-/// Read a GDI bitmap into a top-down RGBA byte buffer.
+/// Read a GDI bitmap into a top-down byte buffer.
 fn read_bitmap_pixels(
     dc: HDC,
     bitmap: HBITMAP,
     width: i32,
     height: i32,
+    swap_to_rgba: bool,
 ) -> Result<Vec<u8>, CaptureError> {
     let mut header = BITMAPINFO {
         bmiHeader: BITMAPINFOHEADER {
@@ -484,12 +498,19 @@ fn read_bitmap_pixels(
         return Err(CaptureError::Gdi("GetDIBits returned no scanlines".into()));
     }
 
-    // GDI hands back BGRA, and leaves the alpha byte as zero for screen content.
-    // Swap to RGBA and force full opacity, otherwise a PNG encoder would write a
-    // fully transparent image.
-    for pixel in buffer.chunks_exact_mut(4) {
-        pixel.swap(0, 2);
-        pixel[3] = 255;
+    // GDI leaves the alpha byte as zero for screen content, so it always has to
+    // be forced opaque — otherwise a PNG encoder writes a fully transparent
+    // image, and the encoder sees garbage alpha. The channel swap is only for
+    // callers that want RGBA; recording keeps the native BGRA order.
+    if swap_to_rgba {
+        for pixel in buffer.as_chunks_mut::<4>().0 {
+            pixel.swap(0, 2);
+            pixel[3] = 255;
+        }
+    } else {
+        for pixel in buffer.as_chunks_mut::<4>().0 {
+            pixel[3] = 255;
+        }
     }
 
     Ok(buffer)
@@ -668,11 +689,9 @@ pub fn monitor_at(point: (i32, i32)) -> Option<MonitorInfo> {
         x: point.0,
         y: point.1,
     };
-    monitors()
-        .into_iter()
-        .find(|m| {
-            p.x >= m.x && p.x < m.x + m.width as i32 && p.y >= m.y && p.y < m.y + m.height as i32
-        })
+    monitors().into_iter().find(|m| {
+        p.x >= m.x && p.x < m.x + m.width as i32 && p.y >= m.y && p.y < m.y + m.height as i32
+    })
 }
 
 #[cfg(test)]

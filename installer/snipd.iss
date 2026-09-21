@@ -83,6 +83,7 @@ var
   PrefixEdit:     TNewEdit;
   PreviewLabel:   TNewStaticText;
   FormatPage:     TInputOptionWizardPage;
+  AfterPage:      TInputOptionWizardPage;
   ClipboardPage:  TInputOptionWizardPage;
   StartupPage:    TInputOptionWizardPage;
 
@@ -240,9 +241,21 @@ begin
   FormatPage.Add('JPEG — smaller files, slight quality loss');
   FormatPage.SelectedValueIndex := 0;
 
-  { Page D — clipboard. }
-  ClipboardPage := CreateInputOptionPage(
+  { Page D — what happens once a capture is taken. }
+  AfterPage := CreateInputOptionPage(
     FormatPage.ID,
+    'After you take a capture',
+    'Snipd can open it so you can mark it up, or simply save it.',
+    'Either way the file is written to disk immediately, so a capture is never'#13#10 +
+    'waiting on you to save it. You can change this later in Settings.',
+    True, False);
+  AfterPage.Add('Open it so I can draw on it and rename it');
+  AfterPage.Add('Just save it and get out of the way');
+  AfterPage.SelectedValueIndex := 0;
+
+  { Page E — clipboard. }
+  ClipboardPage := CreateInputOptionPage(
+    AfterPage.ID,
     'Clipboard',
     'Snipd can put every capture straight on the clipboard.',
     'With this on, a capture is ready to paste the moment you take it.',
@@ -250,7 +263,7 @@ begin
   ClipboardPage.Add('Automatically copy every capture to the clipboard');
   ClipboardPage.Values[0] := True;
 
-  { Page E — startup. }
+  { Page F — startup. }
   StartupPage := CreateInputOptionPage(
     ClipboardPage.ID,
     'Startup',
@@ -287,6 +300,7 @@ var
   Prefix: string;
   Mode: string;
   Format: string;
+  After: string;
 begin
   if NamingByPrefix.Checked then
     Mode := 'prefix'
@@ -302,6 +316,11 @@ begin
   else
     Format := 'png';
 
+  if AfterPage.SelectedValueIndex = 1 then
+    After := 'instant'
+  else
+    After := 'review';
+
   { Shape must match config::Settings. Anything omitted falls back to the app's
     own defaults, because every field there is #[serde(default)]. }
   Json :=
@@ -314,6 +333,7 @@ begin
     '    "prefix": "' + JsonEscape(Prefix) + '",' + #13#10 +
     '    "counter": 1' + #13#10 +
     '  },' + #13#10 +
+    '  "capture": { "after": "' + After + '" },' + #13#10 +
     '  "clipboard": { "autoCopy": ' + JsonBool(ClipboardPage.Values[0]) + ' },' + #13#10 +
     '  "startup": {' + #13#10 +
     '    "launchOnLogin": ' + JsonBool(StartupPage.Values[0]) + ',' + #13#10 +
@@ -379,6 +399,12 @@ begin
     S := S + 'JPEG' + NewLine + NewLine
   else
     S := S + 'PNG' + NewLine + NewLine;
+
+  S := S + 'After a capture:' + NewLine + Space;
+  if AfterPage.SelectedValueIndex = 1 then
+    S := S + 'Save it straight away' + NewLine + NewLine
+  else
+    S := S + 'Open it for mark-up' + NewLine + NewLine;
 
   S := S + 'Behaviour:' + NewLine;
   if ClipboardPage.Values[0] then

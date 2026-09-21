@@ -33,9 +33,11 @@ fn main() {
 
     report_displays();
 
-    let mut settings = Settings::default();
-    settings.save_directory = output.clone();
-    settings.format = ImageFormat::Png;
+    let mut settings = Settings {
+        save_directory: output.clone(),
+        format: ImageFormat::Png,
+        ..Settings::default()
+    };
     // Datetime naming avoids touching the persisted counter, so running this
     // example does not disturb a real installation's numbering.
     settings.naming.mode = NamingMode::Datetime;
@@ -117,7 +119,10 @@ fn report_displays() {
         .windows(2)
         .any(|pair| (pair[0].scale_factor - pair[1].scale_factor).abs() > f64::EPSILON);
     if mixed {
-        println!("  -> Mixed DPI detected ({}). Good test case.", scales.join(", "));
+        println!(
+            "  -> Mixed DPI detected ({}). Good test case.",
+            scales.join(", ")
+        );
     }
     println!();
 }
@@ -126,7 +131,9 @@ fn report_displays() {
 fn run(label: &str, request: CaptureRequest, settings: &mut Settings) -> u32 {
     match capture::capture_and_save(request, settings) {
         Ok(record) => {
-            let on_disk = std::fs::metadata(&record.path).map(|m| m.len()).unwrap_or(0);
+            let on_disk = std::fs::metadata(&record.path)
+                .map(|m| m.len())
+                .unwrap_or(0);
 
             // A capture that "succeeded" but wrote nothing is the failure mode
             // worth catching here, so check the file rather than trusting the
@@ -140,7 +147,11 @@ fn run(label: &str, request: CaptureRequest, settings: &mut Settings) -> u32 {
                 record.width,
                 record.height,
                 on_disk,
-                if record.copied_to_clipboard { "yes" } else { "no" },
+                if record.copied_to_clipboard {
+                    "yes"
+                } else {
+                    "no"
+                },
             );
             println!("      {}", record.file_name);
 

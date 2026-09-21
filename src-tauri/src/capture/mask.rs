@@ -121,15 +121,8 @@ fn rasterise(points: &[Point], origin: (i32, i32), width: u32, height: u32) -> V
 
             // Even-odd rule: fill between alternate pairs of crossings, which
             // handles self-intersecting lassos the way a user expects.
-            for pair in crossings.chunks_exact(2) {
-                add_span(
-                    &mut coverage,
-                    row,
-                    width,
-                    pair[0],
-                    pair[1],
-                    weight,
-                );
+            for pair in crossings.as_chunks::<2>().0 {
+                add_span(&mut coverage, row, width, pair[0], pair[1], weight);
             }
         }
     }
@@ -275,10 +268,7 @@ mod tests {
 
         // The hypotenuse should produce at least one partially transparent
         // pixel; a binary in/out test would only ever yield 0 or 255.
-        let partial = result
-            .image
-            .pixels()
-            .any(|p| p.0[3] > 0 && p.0[3] < 255);
+        let partial = result.image.pixels().any(|p| p.0[3] > 0 && p.0[3] < 255);
         assert!(partial, "expected antialiased edge pixels");
     }
 }

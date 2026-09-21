@@ -1,0 +1,35 @@
+<!--
+  Snipd app icon.
+
+  A dashed marquee with a piece lifted out of it: the clearest statement of what
+  the app does. The lifted piece is ringed by a gap in the tile colour so it
+  genuinely sits above the marquee rather than merely overlapping it.
+
+  The two content lines inside the piece are deliberately the first thing to
+  disappear at small sizes — below about 24px they would mush, and what is left
+  is a clean solid shape that still reads. Nothing here relies on colour, so it
+  survives greyscale and high-contrast modes.
+
+  Rasterised by scripts/make-icon.mjs into the PNG sizes and the .ico Windows
+  needs. Edit this file, not the generated output.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 64 64">
+  <!-- Rounded tile, so the mark has presence on a light taskbar too. -->
+  <rect width="64" height="64" rx="14" fill="#121214"/>
+
+  <!-- The marquee: the region being selected. Held back at 45% so the lifted
+       piece is unmistakably the subject. -->
+  <rect x="9" y="9" width="32" height="32" rx="3"
+        fill="none" stroke="#ffffff" stroke-opacity="0.45"
+        stroke-width="3.5" stroke-dasharray="6.5 5" stroke-linecap="round"/>
+
+  <!-- The gap, in the tile colour, that separates the piece from the marquee. -->
+  <rect x="22" y="22" width="33" height="33" rx="4" fill="#121214"/>
+
+  <!-- The lifted piece. -->
+  <rect x="25" y="25" width="27" height="27" rx="2.5" fill="#ffffff"/>
+
+  <!-- Captured content. First to go at small sizes, by design. -->
+  <rect x="30" y="32" width="17" height="3.2" rx="1.6" fill="#121214"/>
+  <rect x="30" y="39" width="11" height="3.2" rx="1.6" fill="#121214"/>
+</svg>

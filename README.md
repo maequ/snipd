@@ -28,15 +28,27 @@ behaviour rather than in presentation.
 ## Features
 
 **Capture** — press the shortcut anywhere and the screen freezes with a toolbar:
-rectangle, freeform lasso, window, or full screen, plus a delay timer for
-catching menus and hover states. Every capture saves automatically.
+rectangle, freeform lasso, window, full screen, or record, plus a delay timer
+for catching menus and hover states. Every capture saves automatically.
+
+**Two ways to work** — by default a capture opens so you can draw on it and give
+it a real name, then keep it. Or switch to instant saving and it is simply on
+disk the moment you release the mouse. Either way the file is written
+immediately; the choice only changes what happens next.
+
+**Recording** — choose Record in the same overlay, drag an area, and a small bar
+shows the elapsed time with a stop button. Encoded with the H.264 encoder built
+into Windows, so there is nothing extra to install. Frame rate, resolution and
+bitrate are all configurable.
 
 **Library** — every capture, searchable by filename and filterable by date, with
 lazily loaded thumbnails so a folder of thousands stays fast.
 
 **Editor** — pen, arrow, rectangle, ellipse, text, crop, and a redaction tool
-that pixelates rather than blurs. Undo and redo throughout. Saving always writes
-a *copy*, so the original is never destroyed.
+that pixelates rather than blurs. Undo and redo throughout. Reviewing a capture
+you just took keeps it, renamed if you like; editing something from the library
+later writes a *copy*, so a file you may already have shared is never rewritten
+underneath you.
 
 **Pins** — float any capture on top of everything else while you work. Several at
 once, each its own window, dragged by the image itself.
@@ -103,16 +115,27 @@ Output lands in `installer/Output/`.
 
 ```bash
 cd src-tauri
+cargo fmt --check
+cargo clippy --all-targets
 cargo test
 ```
 
-There is also a hardware smoke test that exercises the capture engine against
-the machine it runs on and reports your display layout — useful for checking a
-multi-monitor or mixed-DPI setup:
+There are also two hardware smoke tests, which CI cannot run because they need a
+real desktop. The first reports your display layout, which is useful for
+checking a multi-monitor or mixed-DPI setup:
 
 ```bash
 cd src-tauri
 cargo run --example smoke_capture
+cargo run --example smoke_record
+```
+
+### The icon
+
+`assets/icon.svg` is the source. Regenerate every size with:
+
+```bash
+npm run icon
 ```
 
 ## How it works
@@ -142,6 +165,13 @@ The parts worth knowing about:
 - **`src/overlay.ts`** — the capture overlay. The screen is frozen in Rust
   *before* the overlay appears, so it can never end up in its own capture and a
   delayed capture can catch an open menu without the overlay closing it.
+
+- **`src-tauri/src/record/`** — recording. Media Foundation supplies the H.264
+  encoder and MP4 muxer that ship with Windows, so no ffmpeg is bundled and no
+  licensing questions arise. The capture loop paces itself against a fixed
+  schedule rather than sleeping between frames, and *drops* frames it cannot
+  produce in time rather than letting the timeline drift — a visible stutter is
+  better than a video that silently runs slow, and the count is surfaced.
 
 - **`src/editor.tsx`** — annotation. Edits are a list of shapes in *image*
   coordinates and the canvas repaints from scratch on every change, which makes
@@ -175,7 +205,13 @@ Graphics Capture path can be added without changing callers.
 - [x] Settings, notifications, retention
 - [x] Visual design pass
 - [x] Inno Setup installer with first-run configuration
-- [ ] Screen recording, with resolution and frame rate settings
+- [x] Screen recording, with frame rate and resolution settings
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). It covers the setup, what CI checks, and
+the handful of principles the codebase is built around — worth a skim before a
+first pull request.
 
 ## Licence
 

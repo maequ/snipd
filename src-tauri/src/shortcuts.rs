@@ -41,9 +41,21 @@ pub fn apply(app: &AppHandle, settings: &ShortcutSettings) -> Vec<String> {
     let _ = manager.unregister_all();
 
     let bindings = [
-        (settings.capture.as_str(), Action::OpenOverlay, "New capture"),
-        (settings.region.as_str(), Action::OpenOverlayRectangle, "Region"),
-        (settings.full_screen.as_str(), Action::FullScreen, "Full screen"),
+        (
+            settings.capture.as_str(),
+            Action::OpenOverlay,
+            "New capture",
+        ),
+        (
+            settings.region.as_str(),
+            Action::OpenOverlayRectangle,
+            "Region",
+        ),
+        (
+            settings.full_screen.as_str(),
+            Action::FullScreen,
+            "Full screen",
+        ),
         (
             settings.active_window.as_str(),
             Action::ActiveWindow,

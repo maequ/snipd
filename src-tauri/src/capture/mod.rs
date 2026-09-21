@@ -42,6 +42,8 @@ pub enum CaptureKind {
     Freeform,
     /// An annotated copy saved from the editor.
     Edited,
+    /// A screen recording.
+    Recording,
 }
 
 /// What the caller wants captured.
@@ -50,7 +52,11 @@ pub enum CaptureKind {
 /// variant names, so `monitorId` sent from the UI would never bind to
 /// `monitor_id` and would silently fall back to "all displays".
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "mode")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "mode"
+)]
 pub enum CaptureRequest {
     /// A single display, or the entire virtual desktop when `monitorId` is null.
     FullScreen {
@@ -89,6 +95,14 @@ pub struct CaptureRecord {
     /// Non-fatal problems that happened *after* the file was safely written.
     #[serde(default)]
     pub warnings: Vec<String>,
+    /// Where the UI can fetch the full-size file. Carried on the record so the
+    /// frontend can open a fresh capture in the editor without first going back
+    /// to the library to look it up.
+    #[serde(default)]
+    pub full_url: String,
+    /// Length, for recordings only.
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
 }
 
 /// Capture, save, and copy — in that order. See the module docs.
@@ -188,6 +202,8 @@ pub fn save_frame(
         bytes,
         copied_to_clipboard: copied,
         warnings,
+        full_url: crate::history::media_url(&resolved.path),
+        duration_ms: None,
     };
 
     // --- History index ---------------------------------------------------
@@ -205,9 +221,7 @@ pub fn save_frame(
 }
 
 /// Read the pixels for a request, and describe where they came from.
-fn grab(
-    request: &CaptureRequest,
-) -> Result<(win::Frame, CaptureKind, Option<String>), String> {
+fn grab(request: &CaptureRequest) -> Result<(win::Frame, CaptureKind, Option<String>), String> {
     match request {
         CaptureRequest::FullScreen { monitor_id } => {
             let (area, label) = match monitor_id {
@@ -285,10 +299,18 @@ fn encode_to_disk(
                 // every capture, and the extra second that maximum compression
                 // costs on a 4K screenshot is far more noticeable to the user
                 // than the resulting file-size difference.
-                let encoder =
-                    PngEncoder::new_with_quality(writer, CompressionType::Fast, FilterType::Adaptive);
+                let encoder = PngEncoder::new_with_quality(
+                    writer,
+                    CompressionType::Fast,
+                    FilterType::Adaptive,
+                );
                 encoder
-                    .write_image(image.as_raw(), image.width(), image.height(), ExtendedColorType::Rgba8)
+                    .write_image(
+                        image.as_raw(),
+                        image.width(),
+                        image.height(),
+                        ExtendedColorType::Rgba8,
+                    )
                     .map_err(|e| format!("encoding PNG: {e}"))?;
             }
 
@@ -297,7 +319,8 @@ fn encode_to_disk(
 
                 // JPEG has no alpha channel. Build a packed RGB buffer directly
                 // rather than cloning the whole RGBA image just to drop a byte.
-                let mut rgb = Vec::with_capacity(image.width() as usize * image.height() as usize * 3);
+                let mut rgb =
+                    Vec::with_capacity(image.width() as usize * image.height() as usize * 3);
                 for pixel in image.pixels() {
                     rgb.extend_from_slice(&pixel.0[..3]);
                 }
@@ -337,12 +360,7 @@ pub fn encode_preview(image: &RgbaImage) -> Result<Vec<u8>, String> {
     // at 1:1 on screen content, and keeps a 4K desktop well under a megabyte.
     let mut encoder = JpegEncoder::new_with_quality(&mut buffer, 82);
     encoder
-        .encode(
-            &rgb,
-            image.width(),
-            image.height(),
-            ExtendedColorType::Rgb8,
-        )
+        .encode(&rgb, image.width(), image.height(), ExtendedColorType::Rgb8)
         .map_err(|e| format!("encoding overlay backdrop: {e}"))?;
 
     Ok(buffer)

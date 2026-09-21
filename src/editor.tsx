@@ -23,6 +23,17 @@ export interface EditorProps {
   /** Image to edit, served by the app's image protocol. */
   imageUrl: string;
   fileName: string;
+  /** Absolute path, needed to write an edit back over the original. */
+  path: string;
+  /**
+   * True when this is a capture the user has just taken.
+   *
+   * Reviewing writes back over the capture and can rename it, because it is
+   * seconds old and the marked-up version simply is what they wanted. Editing
+   * something from the library later writes a copy instead, so a file that may
+   * already have been shared is never rewritten underneath them.
+   */
+  reviewing: boolean;
   /** Return to the library. */
   onClose: () => void;
 }
@@ -162,7 +173,7 @@ function drawShape(ctx: CanvasRenderingContext2D, s: Shape): void {
   ctx.restore();
 }
 
-export default function Editor({ imageUrl, fileName, onClose }: EditorProps) {
+export default function Editor({ imageUrl, fileName, path, reviewing, onClose }: EditorProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
 
@@ -187,6 +198,8 @@ export default function Editor({ imageUrl, fileName, onClose }: EditorProps) {
    * window never painted at all.
    */
   const [imageVersion, setImageVersion] = useState(0);
+  /** Filename without its extension, editable during review. */
+  const [name, setName] = useState(() => fileName.replace(/\.[^.]+$/, ""));
 
   const dragging = useRef(false);
   const startPt = useRef<Pt>({ x: 0, y: 0 });
@@ -253,6 +266,11 @@ export default function Editor({ imageUrl, fileName, onClose }: EditorProps) {
     img.onerror = () => setStatus("That capture could not be loaded.");
     img.src = imageUrl;
   }, [imageUrl]);
+
+  // A different capture opened in the same editor brings its own name.
+  useEffect(() => {
+    setName(fileName.replace(/\.[^.]+$/, ""));
+  }, [fileName]);
 
   /** Screen point to image point. The canvas is displayed scaled to fit. */
   const toImage = useCallback((e: React.MouseEvent): Pt => {
@@ -434,6 +452,15 @@ export default function Editor({ imageUrl, fileName, onClose }: EditorProps) {
         setStatus("Nothing to save.");
         return;
       }
+
+      if (reviewing) {
+        await invoke<string>("apply_edit", { path, png, newName: name.trim() || null });
+        // Reviewing is a step in taking a capture, so finishing it returns to
+        // the library rather than leaving the editor open over nothing.
+        onClose();
+        return;
+      }
+
       const record = await invoke<{ fileName: string }>("save_edited", { png });
       setStatus(`Saved a copy as ${record.fileName}`);
     } catch (err) {
@@ -504,14 +531,26 @@ export default function Editor({ imageUrl, fileName, onClose }: EditorProps) {
         </div>
 
         <div className="bar__group bar__group--end">
+          {reviewing && (
+            <label className="bar__name">
+              <span className="sr-only">File name</span>
+              <input
+                type="text"
+                value={name}
+                spellCheck={false}
+                placeholder="File name"
+                onChange={(e) => setName(e.target.value)}
+              />
+            </label>
+          )}
           <button type="button" onClick={onClose}>
-            Back to library
+            {reviewing ? "Discard changes" : "Back to library"}
           </button>
           <button type="button" onClick={() => void copyToClipboard()} disabled={busy}>
             Copy
           </button>
           <button type="button" className="primary" onClick={() => void save()} disabled={busy}>
-            {busy ? "Working…" : "Save a copy"}
+            {busy ? "Working…" : reviewing ? "Save" : "Save a copy"}
           </button>
         </div>
       </div>
@@ -551,7 +590,7 @@ export default function Editor({ imageUrl, fileName, onClose }: EditorProps) {
         </div>
       </div>
 
-      <p className="filename">{fileName}</p>
+      <p className="filename">{reviewing ? path : fileName}</p>
     </div>
   );
 }

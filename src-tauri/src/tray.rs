@@ -13,8 +13,10 @@ use crate::overlay;
 /// Build the tray icon and wire its menu.
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let new_capture = MenuItem::with_id(app, "capture", "New capture", true, None::<&str>)?;
-    let capture_screen = MenuItem::with_id(app, "fullscreen", "Capture full screen", true, None::<&str>)?;
-    let capture_window = MenuItem::with_id(app, "window", "Capture active window", true, None::<&str>)?;
+    let capture_screen =
+        MenuItem::with_id(app, "fullscreen", "Capture full screen", true, None::<&str>)?;
+    let capture_window =
+        MenuItem::with_id(app, "window", "Capture active window", true, None::<&str>)?;
     let open = MenuItem::with_id(app, "open", "Open Snipd", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Snipd", true, None::<&str>)?;
 

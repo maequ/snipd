@@ -119,9 +119,11 @@ pub async fn begin_capture(
     if delay > 0 {
         // Blocking sleep on the runtime's blocking pool: this must not occupy an
         // async worker, and deliberately no lock is held across the await.
-        tauri::async_runtime::spawn_blocking(move || std::thread::sleep(Duration::from_millis(delay)))
-            .await
-            .map_err(|e| format!("capture delay failed: {e}"))?;
+        tauri::async_runtime::spawn_blocking(move || {
+            std::thread::sleep(Duration::from_millis(delay))
+        })
+        .await
+        .map_err(|e| format!("capture delay failed: {e}"))?;
     }
 
     freeze(&app, mode.unwrap_or_else(|| "rectangle".to_string()))?;
@@ -173,10 +175,14 @@ pub fn overlay_state(app: AppHandle) -> Result<OverlayState, String> {
 #[tauri::command]
 pub fn capture_rect(app: AppHandle, selection: RectSelection) -> Result<CaptureRecord, String> {
     finish(&app, |session, state| {
-        let cropped = session.frame.crop(selection.bounds).map_err(|e| e.to_string())?;
-        let source = selection.source.clone().or_else(|| {
-            win::monitor_at((selection.bounds.x, selection.bounds.y)).map(|m| m.label)
-        });
+        let cropped = session
+            .frame
+            .crop(selection.bounds)
+            .map_err(|e| e.to_string())?;
+        let source = selection
+            .source
+            .clone()
+            .or_else(|| win::monitor_at((selection.bounds.x, selection.bounds.y)).map(|m| m.label));
 
         let mut settings = state
             .settings
@@ -257,18 +263,19 @@ async fn show_overlay(app: &AppHandle) -> Result<(), String> {
             .desktop
     };
 
-    let overlay = WebviewWindowBuilder::new(app, OVERLAY_LABEL, WebviewUrl::App("overlay.html".into()))
-        .title("Snipd capture")
-        .decorations(false)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .resizable(false)
-        .shadow(false)
-        // Shown only once positioned, so it never flashes at the wrong size on
-        // the wrong display.
-        .visible(false)
-        .build()
-        .map_err(|e| format!("could not create the capture overlay: {e}"))?;
+    let overlay =
+        WebviewWindowBuilder::new(app, OVERLAY_LABEL, WebviewUrl::App("overlay.html".into()))
+            .title("Snipd capture")
+            .decorations(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .resizable(false)
+            .shadow(false)
+            // Shown only once positioned, so it never flashes at the wrong size on
+            // the wrong display.
+            .visible(false)
+            .build()
+            .map_err(|e| format!("could not create the capture overlay: {e}"))?;
 
     // Physical pixels throughout. Logical coordinates would be scaled by the DPI
     // of whichever display Windows decides the window belongs to, which is wrong

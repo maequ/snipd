@@ -479,3 +479,295 @@
   text-underline-offset: 2px;
   word-break: break-all;
 }
+
+/* ---------------------------------------------------------------------------
+   Motion
+
+   Used for three specific moments and nowhere else: something arriving (the
+   viewer, a banner), something being pointed at (a tile), and switching view.
+   Decorative fade-and-slide on every element is the thing the brief rules out,
+   and it makes an app feel slower than it is.
+   --------------------------------------------------------------------------- */
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes settle {
+  from { opacity: 0; transform: scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Honour the OS setting. Someone who asked for less motion means it. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* --- stats strip --- */
+
+.stats {
+  display: flex;
+  align-items: baseline;
+  gap: 26px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  animation: fade 220ms ease both;
+}
+
+.stats__item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.stats__item--end {
+  margin-left: auto;
+}
+
+.stats__value {
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats__label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* --- library additions --- */
+
+.library {
+  animation: fade 180ms ease both;
+}
+
+.library__teach {
+  display: inline-block;
+  max-width: 44ch;
+  margin-top: 10px;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.tile {
+  transition:
+    border-color 140ms ease,
+    transform 140ms ease;
+}
+
+.tile:hover {
+  /* A millimetre of lift, not a bounce. */
+  transform: translateY(-2px);
+}
+
+.tile__video {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tile__video svg {
+  width: 30px;
+  height: 30px;
+}
+
+.tile:hover .tile__video {
+  color: var(--text);
+}
+
+/* --- viewer --- */
+
+.viewer {
+  animation: fade 140ms ease both;
+}
+
+.viewer__panel {
+  /* Roomier than before: the picture is the reason this panel exists. */
+  max-width: 1400px;
+  animation: settle 160ms ease both;
+}
+
+.viewer__stage {
+  padding: 22px;
+}
+
+/*
+ * A visible boundary around the image.
+ *
+ * Without it a capture that happens to be one flat dark colour is
+ * indistinguishable from a broken image on a dark background — which is
+ * exactly how a perfectly good capture came to look like a bug.
+ */
+.viewer__image {
+  max-height: 76vh;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.viewer__video {
+  max-width: 100%;
+  max-height: 76vh;
+  border-radius: var(--radius);
+  background: #000;
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+/* --- settings --- */
+
+.settings__nav {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.settings__nav button {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 7px 14px;
+}
+
+.settings__nav button:hover {
+  color: var(--text);
+}
+
+.settings__nav button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.settings__body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  animation: rise 180ms ease both;
+}
+
+.settings__note--tight {
+  margin: 4px 0 0;
+  max-width: 62ch;
+  line-height: 1.6;
+}
+
+/* Segmented control, for the small fixed choices in recording. */
+.settings__segmented {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.settings__segmented button {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 5px 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings__segmented button:hover {
+  color: var(--text);
+}
+
+.settings__segmented button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+/* Explained radio choices, where a plain toggle would not carry the meaning. */
+.choice {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.choice__option {
+  display: flex;
+  gap: 11px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color 140ms ease;
+}
+
+.choice__option:hover {
+  border-color: var(--text-muted);
+}
+
+.choice__option:has(input:checked) {
+  border-color: var(--accent);
+}
+
+.choice__option input {
+  margin: 2px 0 0;
+  flex: none;
+  accent-color: var(--accent);
+}
+
+.choice__option strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.choice__option small {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}

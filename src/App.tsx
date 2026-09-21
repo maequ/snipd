@@ -1,9 +1,9 @@
 /**
- * The main window: the capture library, and settings.
+ * The main window.
  *
- * Capture itself no longer starts here in any meaningful sense — it starts with
- * the global shortcut, the tray, or the one button below, all of which open the
- * same overlay where the mode is actually chosen.
+ * Capture does not really start here — it starts with the global shortcut, the
+ * tray, or the one button below, all of which open the same overlay where the
+ * mode is chosen. This window is the library, the editor, and settings.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -13,6 +13,7 @@ import { listen } from "@tauri-apps/api/event";
 import History, { type HistoryEntry } from "./History";
 import Editor from "./editor";
 import SettingsPanel, { type Settings } from "./Settings";
+import Stats from "./Stats";
 import "./App.css";
 
 interface CaptureRecord {
@@ -22,9 +23,24 @@ interface CaptureRecord {
   height: number;
   copiedToClipboard: boolean;
   warnings: string[];
+  fullUrl: string;
 }
 
-type Tab = "library" | "settings";
+interface RecordingOutcome {
+  fileName: string;
+  width: number;
+  height: number;
+  durationMs: number;
+  dropped: number;
+}
+
+type Tab = "library" | "recordings" | "settings";
+
+const TABS: Array<{ id: Tab; label: string }> = [
+  { id: "library", label: "Library" },
+  { id: "recordings", label: "Recordings" },
+  { id: "settings", label: "Settings" },
+];
 
 /** Turn an accelerator string into something readable on Windows. */
 function prettyShortcut(accelerator: string): string {
@@ -38,30 +54,35 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [refreshToken, setRefreshToken] = useState(0);
+  const [recording, setRecording] = useState(false);
+
   /**
    * The capture open in the editor.
    *
    * The editor is a view in this window rather than a window of its own: a
-   * separately created window would not load its bundle at all, rendering
-   * blank, and this side-steps that entirely while also keeping the app to a
-   * single window.
+   * separately created window would not load its bundle at all and rendered
+   * blank, and this side-steps that entirely.
    */
   const [editing, setEditing] = useState<HistoryEntry | null>(null);
+  /** True when the editor was opened by a capture rather than from the library. */
+  const [reviewing, setReviewing] = useState(false);
+
+  const loadSettings = useCallback(async () => {
+    try {
+      const [config, shortcutWarnings] = await Promise.all([
+        invoke<Settings>("get_settings"),
+        invoke<string[]>("get_shortcut_warnings"),
+      ]);
+      setSettings(config);
+      setWarnings(shortcutWarnings);
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const [config, shortcutWarnings] = await Promise.all([
-          invoke<Settings>("get_settings"),
-          invoke<string[]>("get_shortcut_warnings"),
-        ]);
-        setSettings(config);
-        setWarnings(shortcutWarnings);
-      } catch (err) {
-        setError(String(err));
-      }
-    })();
-  }, []);
+    void loadSettings();
+  }, [loadSettings]);
 
   // Apply the theme by flipping an attribute the stylesheet keys off, so
   // "Match Windows" simply means leaving the OS preference to decide.
@@ -73,17 +94,54 @@ export default function App() {
 
   useEffect(() => {
     const completed = listen<CaptureRecord>("capture-complete", (event) => {
-      setLast(event.payload);
+      const record = event.payload;
+      setLast(record);
       setError(null);
       setRefreshToken((token) => token + 1);
+
+      // The capture is already on disk either way. Reviewing only decides
+      // whether it opens for mark-up and renaming first.
+      if (settings?.capture.after === "review" && record.fullUrl) {
+        setReviewing(true);
+        setEditing({
+          path: record.path,
+          fileName: record.fileName,
+          takenAtMs: Date.now(),
+          bytes: 0,
+          width: record.width,
+          height: record.height,
+          kind: null,
+          source: null,
+          thumbnailUrl: "",
+          fullUrl: record.fullUrl,
+          isVideo: false,
+          durationMs: null,
+        });
+      }
     });
+
     const failed = listen<string>("capture-failed", (event) => setError(event.payload));
+
+    const recorded = listen<RecordingOutcome>("recording-complete", (event) => {
+      setRecording(false);
+      setRefreshToken((token) => token + 1);
+      setTab("recordings");
+      const { fileName, durationMs, dropped } = event.payload;
+      const seconds = Math.round(durationMs / 1000);
+      setLast(null);
+      setError(
+        dropped > 0
+          ? `Saved ${fileName} (${seconds}s) — ${dropped} frames were dropped. Lower the resolution or frame rate in Settings if that keeps happening.`
+          : null,
+      );
+    });
 
     return () => {
       void completed.then((un) => un());
       void failed.then((un) => un());
+      void recorded.then((un) => un());
     };
-  }, []);
+  }, [settings]);
 
   const newCapture = useCallback(async () => {
     setError(null);
@@ -96,16 +154,20 @@ export default function App() {
     }
   }, []);
 
+  const closeEditor = useCallback(() => {
+    setEditing(null);
+    setReviewing(false);
+    setRefreshToken((token) => token + 1);
+  }, []);
+
   if (editing) {
     return (
       <Editor
         imageUrl={editing.fullUrl}
         fileName={editing.fileName}
-        onClose={() => {
-          setEditing(null);
-          // A saved copy is a new capture, so the library needs refetching.
-          setRefreshToken((token) => token + 1);
-        }}
+        path={editing.path}
+        reviewing={reviewing}
+        onClose={closeEditor}
       />
     );
   }
@@ -124,7 +186,12 @@ export default function App() {
         </div>
 
         <div className="app__actions">
-          <button type="button" className="primary" onClick={() => void newCapture()}>
+          <button
+            type="button"
+            className="primary"
+            onClick={() => void newCapture()}
+            disabled={recording}
+          >
             New capture
           </button>
           {settings && (
@@ -136,17 +203,21 @@ export default function App() {
       </header>
 
       <nav className="tabs">
-        <button type="button" aria-pressed={tab === "library"} onClick={() => setTab("library")}>
-          Library
-        </button>
-        <button type="button" aria-pressed={tab === "settings"} onClick={() => setTab("settings")}>
-          Settings
-        </button>
+        {TABS.map((entry) => (
+          <button
+            key={entry.id}
+            type="button"
+            aria-pressed={tab === entry.id}
+            onClick={() => setTab(entry.id)}
+          >
+            {entry.label}
+          </button>
+        ))}
       </nav>
 
       {error && <p className="banner banner--error">{error}</p>}
 
-      {warnings.length > 0 && tab === "library" && (
+      {warnings.length > 0 && tab !== "settings" && (
         <div className="banner banner--warn">
           {warnings.map((warning) => (
             <p key={warning}>{warning}</p>
@@ -162,13 +233,36 @@ export default function App() {
         </p>
       )}
 
-      {tab === "library" ? (
-        <History refreshToken={refreshToken} onEdit={setEditing} />
-      ) : settings ? (
-        <SettingsPanel initial={settings} onSaved={setSettings} />
-      ) : (
-        <p className="library__empty">Loading settings…</p>
+      {tab !== "settings" && <Stats refreshToken={refreshToken} />}
+
+      {tab === "library" && (
+        <History
+          media="image"
+          refreshToken={refreshToken}
+          onEdit={(entry) => {
+            setReviewing(false);
+            setEditing(entry);
+          }}
+        />
       )}
+
+      {tab === "recordings" && (
+        <History
+          media="video"
+          refreshToken={refreshToken}
+          onEdit={(entry) => {
+            setReviewing(false);
+            setEditing(entry);
+          }}
+        />
+      )}
+
+      {tab === "settings" &&
+        (settings ? (
+          <SettingsPanel initial={settings} onSaved={setSettings} />
+        ) : (
+          <p className="library__empty">Loading settings…</p>
+        ))}
     </main>
   );
 }

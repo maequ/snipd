@@ -16,6 +16,7 @@ pub mod history;
 pub mod naming;
 pub mod overlay;
 pub mod pin;
+pub mod record;
 pub mod shortcuts;
 pub mod tray;
 
@@ -44,6 +45,9 @@ pub struct AppState {
     pub shortcut_warnings: Mutex<Vec<String>>,
     /// Which capture each pinned window is showing, keyed by window label.
     pub pins: pin::PinRegistry,
+    /// The recording in progress, if any. Only one at a time: two recordings
+    /// would compete for the same encoder and produce two half-speed videos.
+    pub recording: Mutex<Option<record::ActiveRecording>>,
 }
 
 /// A capture taken without showing the overlay.
@@ -303,6 +307,257 @@ fn save_edited(png: String, state: State<'_, AppState>) -> Result<CaptureRecord,
     )
 }
 
+/// Totals for the library summary strip.
+#[tauri::command]
+fn library_stats(state: State<'_, AppState>) -> Result<history::LibraryStats, String> {
+    Ok(history::stats(&save_directory(&state)?))
+}
+
+/// Rename a capture, keeping its extension.
+///
+/// Used by the review step so a capture can be given a meaningful name while it
+/// is still fresh, which is the only moment anyone actually remembers what it
+/// was of.
+#[tauri::command]
+fn rename_capture(
+    path: String,
+    new_name: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let directory = save_directory(&state)?;
+    let current = std::path::PathBuf::from(&path);
+
+    let root = directory
+        .canonicalize()
+        .map_err(|e| format!("save folder is unavailable: {e}"))?;
+    let canonical = current
+        .canonicalize()
+        .map_err(|_| format!("{path} no longer exists"))?;
+    if !canonical.starts_with(&root) {
+        return Err("refusing to rename a file outside the save folder".into());
+    }
+
+    let extension = canonical
+        .extension()
+        .map(|e| e.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "png".into());
+
+    // The same sanitising the automatic namer uses, so a typed name cannot
+    // produce something Windows will not accept.
+    let stem = naming::sanitise_stem(&new_name);
+    let mut target = directory.join(format!("{stem}.{extension}"));
+
+    if target == canonical {
+        return Ok(canonical.to_string_lossy().into_owned());
+    }
+
+    // Never clobber: if the name is taken, add a suffix rather than destroying
+    // whatever is already there.
+    let mut attempt = 2;
+    while target.exists() {
+        target = directory.join(format!("{stem}_{attempt}.{extension}"));
+        attempt += 1;
+        if attempt > 1000 {
+            return Err("could not find a free filename".into());
+        }
+    }
+
+    std::fs::rename(&canonical, &target).map_err(|e| format!("could not rename: {e}"))?;
+    Ok(target.to_string_lossy().into_owned())
+}
+
+/// Begin recording the given area.
+#[tauri::command]
+fn start_recording(bounds: capture::Bounds, state: State<'_, AppState>) -> Result<(), String> {
+    let mut slot = state
+        .recording
+        .lock()
+        .map_err(|_| "recording lock poisoned".to_string())?;
+    if slot.is_some() {
+        return Err("a recording is already in progress".into());
+    }
+
+    let (request, output) = {
+        let mut settings = state
+            .settings
+            .lock()
+            .map_err(|_| "settings lock poisoned".to_string())?;
+
+        let directory = settings.ensure_save_directory()?;
+        let resolved = naming::resolve(naming::NameRequest {
+            dir: &directory,
+            naming: &settings.naming,
+            extension: "mp4",
+            taken_at: chrono::Local::now(),
+        });
+
+        // Recordings consume the same counter as stills, so a prefix sequence
+        // stays continuous across both rather than colliding.
+        if let Some(used) = resolved.counter_used {
+            settings.naming.counter = used.saturating_add(1);
+            let _ = settings.save();
+        }
+
+        (
+            record::RecordingRequest {
+                bounds,
+                fps: settings.recording.fps,
+                scale_percent: settings.recording.scale_percent,
+                bitrate_mbps: settings.recording.bitrate_mbps,
+            },
+            resolved.path,
+        )
+    };
+
+    *slot = Some(record::start(request, output)?);
+    Ok(())
+}
+
+/// Start recording the area the overlay selected.
+///
+/// Separate from [`start_recording`] because the overlay has to be torn down
+/// first — it covers the whole screen, so recording with it still up would
+/// capture the overlay rather than what is behind it.
+#[tauri::command]
+async fn start_recording_from_overlay(
+    app: AppHandle,
+    bounds: capture::Bounds,
+) -> Result<(), String> {
+    overlay::close_overlay(&app);
+    // Release the frozen desktop. Recording does not need it and it is tens of
+    // megabytes.
+    release_capture_session(&app);
+
+    // The overlay is destroyed asynchronously, so recording immediately would
+    // still catch it in the first frames.
+    tauri::async_runtime::spawn_blocking(|| {
+        std::thread::sleep(std::time::Duration::from_millis(180))
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let state = app.state::<AppState>();
+    start_recording(bounds, state)?;
+    record::show_bar(&app)
+}
+
+/// Drop the frozen desktop held for a capture session.
+///
+/// A free function rather than inline, because binding the guard with `let …
+/// else` is what keeps it from outliving the `State` it borrows from — the
+/// borrow checker rejects the equivalent `if let` inside a block.
+fn release_capture_session(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let Ok(mut session) = state.session.lock() else {
+        return;
+    };
+    *session = None;
+}
+
+/// Stop the recording and finalise the file.
+#[tauri::command]
+fn stop_recording(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<record::RecordingOutcome, String> {
+    let active = {
+        let mut slot = state
+            .recording
+            .lock()
+            .map_err(|_| "recording lock poisoned".to_string())?;
+        slot.take()
+            .ok_or_else(|| "nothing is recording".to_string())?
+    };
+
+    record::hide_bar(&app);
+    let outcome = active.stop()?;
+
+    // Recordings go into the same index as stills so the library can list both
+    // without a second source of truth.
+    let entry = CaptureRecord {
+        id: format!("rec-{}", chrono::Local::now().format("%Y%m%d%H%M%S%3f")),
+        path: outcome.path.clone(),
+        file_name: outcome.file_name.clone(),
+        width: outcome.width,
+        height: outcome.height,
+        taken_at: chrono::Local::now().to_rfc3339(),
+        kind: capture::CaptureKind::Recording,
+        source: None,
+        bytes: outcome.bytes,
+        copied_to_clipboard: false,
+        warnings: Vec::new(),
+        full_url: history::media_url(std::path::Path::new(&outcome.path)),
+        duration_ms: Some(outcome.duration_ms),
+    };
+    let _ = history::record(&entry);
+
+    let _ = app.emit("recording-complete", &outcome);
+    tray::show_main_window(&app);
+    Ok(outcome)
+}
+
+/// Live state of the recording, for the floating bar.
+#[tauri::command]
+fn recording_status(state: State<'_, AppState>) -> record::RecordingStatus {
+    state
+        .recording
+        .lock()
+        .ok()
+        .and_then(|slot| slot.as_ref().map(|active| active.status()))
+        .unwrap_or(record::RecordingStatus {
+            recording: false,
+            elapsed_ms: 0,
+            frames: 0,
+            dropped: 0,
+        })
+}
+
+/// Apply an edit to a capture in place, optionally renaming it.
+///
+/// Used by the review step, where the capture was taken seconds ago and the
+/// annotated version simply *is* the capture the user wanted. That is different
+/// from editing something out of the library later, which writes a copy so an
+/// older, already-shared file is never rewritten underneath them.
+#[tauri::command]
+fn apply_edit(
+    path: String,
+    png: String,
+    new_name: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    use base64::Engine;
+
+    let directory = save_directory(&state)?;
+    let target = std::path::PathBuf::from(&path);
+
+    let root = directory
+        .canonicalize()
+        .map_err(|e| format!("save folder is unavailable: {e}"))?;
+    let canonical = target
+        .canonicalize()
+        .map_err(|_| format!("{path} no longer exists"))?;
+    if !canonical.starts_with(&root) {
+        return Err("refusing to write outside the save folder".into());
+    }
+
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(png.as_bytes())
+        .map_err(|e| format!("the edited image was not valid base64: {e}"))?;
+
+    // Written beside the target and renamed over it, so an interrupted write
+    // cannot leave a half-written file where a good capture used to be.
+    let temporary = canonical.with_extension("editing.part");
+    std::fs::write(&temporary, &bytes).map_err(|e| format!("writing the edit: {e}"))?;
+    std::fs::rename(&temporary, &canonical).map_err(|e| format!("replacing the capture: {e}"))?;
+
+    match new_name {
+        Some(name) if !name.trim().is_empty() => {
+            rename_capture(canonical.to_string_lossy().into_owned(), name, state)
+        }
+        _ => Ok(canonical.to_string_lossy().into_owned()),
+    }
+}
+
 /// Copy an annotated image to the clipboard without saving it.
 ///
 /// Separate from [`save_edited`] because wanting a marked-up screenshot on the
@@ -422,22 +677,16 @@ fn save_directory(state: &State<'_, AppState>) -> Result<std::path::PathBuf, Str
 /// Thumbnails are addressed by an opaque key rather than a file path, so the
 /// webview cannot ask this handler for an arbitrary file: a key only resolves if
 /// it matches something currently sitting in the save folder.
-fn serve_image(
-    app: &AppHandle,
-    path: &str,
-    query: Option<&str>,
-) -> tauri::http::Response<Vec<u8>> {
-    let resolved = query
-        .and_then(|q| query_param(q, "k"))
-        .and_then(|key| {
-            let directory = app
-                .state::<AppState>()
-                .settings
-                .lock()
-                .ok()
-                .map(|s| s.save_directory.clone())?;
-            history::resolve_thumbnail_key(&key, &directory)
-        });
+fn serve_image(app: &AppHandle, path: &str, query: Option<&str>) -> tauri::http::Response<Vec<u8>> {
+    let resolved = query.and_then(|q| query_param(q, "k")).and_then(|key| {
+        let directory = app
+            .state::<AppState>()
+            .settings
+            .lock()
+            .ok()
+            .map(|s| s.save_directory.clone())?;
+        history::resolve_thumbnail_key(&key, &directory)
+    });
 
     let (bytes, mime) = match path {
         "/backdrop" => (
@@ -537,12 +786,17 @@ pub fn run() {
             session: Mutex::new(None),
             shortcut_warnings: Mutex::new(Vec::new()),
             pins: Mutex::new(std::collections::HashMap::new()),
+            recording: Mutex::new(None),
         })
         // Serves the overlay's frozen backdrop straight from memory. Going via
         // disk or base64-over-IPC would both add a visible delay before the
         // overlay can draw.
         .register_uri_scheme_protocol(overlay::FRAME_SCHEME, |ctx, request| {
-            serve_image(ctx.app_handle(), request.uri().path(), request.uri().query())
+            serve_image(
+                ctx.app_handle(),
+                request.uri().path(),
+                request.uri().query(),
+            )
         })
         .on_window_event(|window, event| {
             // Closing the main window hides it instead of quitting, so the
@@ -617,6 +871,13 @@ pub fn run() {
             copy_capture,
             save_edited,
             copy_edited,
+            apply_edit,
+            library_stats,
+            rename_capture,
+            start_recording,
+            stop_recording,
+            recording_status,
+            start_recording_from_overlay,
             update_settings,
             pin::pin_capture,
             pin::pin_state,

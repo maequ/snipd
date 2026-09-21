@@ -146,7 +146,9 @@ pub struct WindowSettings {
 
 impl Default for WindowSettings {
     fn default() -> Self {
-        Self { close_to_tray: true }
+        Self {
+            close_to_tray: true,
+        }
     }
 }
 
@@ -192,6 +194,57 @@ impl Default for ShortcutSettings {
     }
 }
 
+/// What happens the moment a capture is taken.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AfterCapture {
+    /// Open the editor so it can be marked up and renamed before being kept.
+    ///
+    /// The file is still written to disk immediately — reviewing changes what
+    /// happens *next*, never whether the capture survives.
+    Review,
+    /// Save and get out of the way.
+    Instant,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CaptureSettings {
+    pub after: AfterCapture,
+}
+
+impl Default for CaptureSettings {
+    fn default() -> Self {
+        // Reviewing is the default because marking up a screenshot is the
+        // common case; instant is there for people who just want the file.
+        Self {
+            after: AfterCapture::Review,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RecordingSettings {
+    pub fps: u32,
+    /// Percentage of the captured size to encode at. Lower is the single most
+    /// effective way to make recording keep up on a slower machine.
+    pub scale_percent: u32,
+    pub bitrate_mbps: u32,
+}
+
+impl Default for RecordingSettings {
+    fn default() -> Self {
+        // 30fps at native size and 12 Mbps looks clean for screen content, which
+        // is mostly static and compresses far better than camera footage.
+        Self {
+            fps: 30,
+            scale_percent: 100,
+            bitrate_mbps: 12,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct RetentionSettings {
@@ -224,6 +277,8 @@ pub struct Settings {
     pub jpeg_quality: u8,
     pub theme: Theme,
     pub naming: NamingSettings,
+    pub capture: CaptureSettings,
+    pub recording: RecordingSettings,
     pub clipboard: ClipboardSettings,
     pub startup: StartupSettings,
     pub window: WindowSettings,
@@ -241,6 +296,8 @@ impl Default for Settings {
             jpeg_quality: 92,
             theme: Theme::System,
             naming: NamingSettings::default(),
+            capture: CaptureSettings::default(),
+            recording: RecordingSettings::default(),
             clipboard: ClipboardSettings::default(),
             startup: StartupSettings::default(),
             window: WindowSettings::default(),
@@ -371,6 +428,12 @@ impl Settings {
         if self.retention.days == 0 {
             self.retention.days = 1;
         }
+
+        // Clamped rather than rejected: a hand-edited config should be pulled
+        // back into range, not stop the app starting.
+        self.recording.fps = self.recording.fps.clamp(5, 60);
+        self.recording.scale_percent = self.recording.scale_percent.clamp(25, 100);
+        self.recording.bitrate_mbps = self.recording.bitrate_mbps.clamp(1, 60);
     }
 
     /// Write settings to disk, creating `%APPDATA%\Snipd` if needed.

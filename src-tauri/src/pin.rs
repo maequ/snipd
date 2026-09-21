@@ -80,7 +80,10 @@ pub fn pin_capture(app: AppHandle, path: String) -> Result<(), String> {
 
 /// Tell a pin window which capture it is showing.
 #[tauri::command]
-pub fn pin_state(window: tauri::Window, state: tauri::State<'_, AppState>) -> Result<PinState, String> {
+pub fn pin_state(
+    window: tauri::Window,
+    state: tauri::State<'_, AppState>,
+) -> Result<PinState, String> {
     let label = window.label().to_string();
     let path = {
         let pins = state
@@ -104,7 +107,10 @@ pub fn pin_state(window: tauri::Window, state: tauri::State<'_, AppState>) -> Re
     let _ = crate::history::resolve_thumbnail_key(&key, &directory);
 
     Ok(PinState {
-        image_url: format!("http://{}.localhost/full?k={key}", crate::overlay::FRAME_SCHEME),
+        image_url: format!(
+            "http://{}.localhost/full?k={key}",
+            crate::overlay::FRAME_SCHEME
+        ),
         file_name: path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
@@ -125,7 +131,10 @@ pub fn close_pin(window: tauri::Window, state: tauri::State<'_, AppState>) -> Re
 /// Lowest unused pin number, so labels do not collide with a still-open pin.
 fn next_pin_id(app: &AppHandle) -> u64 {
     let mut id = 1;
-    while app.get_webview_window(&format!("{PIN_PREFIX}{id}")).is_some() {
+    while app
+        .get_webview_window(&format!("{PIN_PREFIX}{id}"))
+        .is_some()
+    {
         id += 1;
     }
     id
@@ -134,8 +143,8 @@ fn next_pin_id(app: &AppHandle) -> u64 {
 /// Size a pin to the image, scaled down to stay a reasonable fraction of the screen.
 fn fit_to_screen(app: &AppHandle, path: &Path) -> Result<(u32, u32), String> {
     // Reads only the header, not the whole image.
-    let (image_width, image_height) =
-        image::image_dimensions(path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
+    let (image_width, image_height) = image::image_dimensions(path)
+        .map_err(|e| format!("could not read {}: {e}", path.display()))?;
 
     let desktop = crate::capture::win::virtual_desktop();
     let max_width = (desktop.width as f64 * MAX_SCREEN_FRACTION) as u32;

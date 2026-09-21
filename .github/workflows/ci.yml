@@ -1,0 +1,79 @@
+# Continuous integration.
+#
+# Windows only, because the app is Windows only — the capture backend is written
+# against Win32 and recording uses Media Foundation, so a Linux runner could not
+# even compile it, let alone tell us anything useful.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A new push to the same branch makes the previous run irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Warnings are failures in CI but not locally, so that iterating stays quick
+  # while nothing sloppy reaches main.
+  RUSTFLAGS: -D warnings
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install the Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo artefacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      # Type-checks and builds the frontend. `tauri build` needs the output to
+      # exist, so this has to come before anything that touches Rust.
+      - name: Build the frontend
+        run: npm run build
+
+      - name: Check formatting
+        working-directory: src-tauri
+        run: cargo fmt --check
+
+      - name: Lint
+        working-directory: src-tauri
+        run: cargo clippy --all-targets
+
+      - name: Test
+        working-directory: src-tauri
+        run: cargo test
+
+      # Proves the thing people actually download still links. The smoke tests
+      # are deliberately not run here: they need a real desktop and a display,
+      # and a headless runner has neither.
+      - name: Build the application
+        run: npm run tauri build -- --no-bundle
+
+      - name: Upload the executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: snipd-exe
+          path: src-tauri/target/release/snipd.exe
+          if-no-files-found: error

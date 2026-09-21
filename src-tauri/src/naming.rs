@@ -304,7 +304,10 @@ mod tests {
 
     #[test]
     fn illegal_characters_are_replaced() {
-        assert_eq!(sanitise_stem(r#"a<b>c:d"e/f\g|h?i*j"#), "a_b_c_d_e_f_g_h_i_j");
+        assert_eq!(
+            sanitise_stem(r#"a<b>c:d"e/f\g|h?i*j"#),
+            "a_b_c_d_e_f_g_h_i_j"
+        );
     }
 
     #[test]
