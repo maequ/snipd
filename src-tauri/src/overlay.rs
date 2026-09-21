@@ -320,6 +320,15 @@ where
     // rather than at some later scope exit.
     drop(session);
 
+    // The overlay comes down first, before anything slower happens.
+    //
+    // It covers the screen with a still of the desktop, so every millisecond it
+    // stays up after the mouse is released looks exactly like the machine has
+    // frozen. Building the editor window takes long enough to be obvious, and
+    // doing it while the overlay was still on screen is what made releasing a
+    // selection appear to lock the screen on that frame.
+    close_overlay(app);
+
     match &outcome {
         Ok(record) => {
             crate::announce_capture(app, record);
@@ -349,7 +358,6 @@ where
         }
     }
 
-    close_overlay(app);
     outcome
 }
 

@@ -28,8 +28,15 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::capture::win::{self, Bounds};
+use crate::capture::win::{self, Bounds, FrameGrabber};
 use encoder::Encoder;
+
+/// Bits spent per pixel per frame when deriving a bitrate floor.
+///
+/// Tuned for screen content rather than camera footage. Large flat areas cost
+/// almost nothing to encode, so most of the budget goes on text edges — which
+/// are exactly what turns to mush when a screen recording is under-encoded.
+const BITS_PER_PIXEL_PER_FRAME: f64 = 0.15;
 
 /// How a recording was asked for.
 #[derive(Debug, Clone, Copy)]
@@ -116,7 +123,17 @@ pub fn start(request: RecordingRequest, output: PathBuf) -> Result<ActiveRecordi
     let target_height = ((source.height as f64 * scale).round() as u32).max(16);
 
     let fps = request.fps.clamp(5, 60);
-    let bitrate = request.bitrate_mbps.clamp(1, 60) * 1_000_000;
+
+    // Screen content is mostly flat colour and sharp text, which H.264 handles
+    // well — but starve it and text is the first thing to turn to mush. A fixed
+    // megabit figure that looks fine on a small region is badly short on a
+    // 1440p one, so the configured rate is treated as a floor and raised to
+    // suit the number of pixels actually being encoded.
+    let pixels = u64::from(target_width) * u64::from(target_height);
+    let suggested = (pixels * u64::from(fps)) as f64 * BITS_PER_PIXEL_PER_FRAME;
+    let bitrate = (request.bitrate_mbps.clamp(1, 60) as u64 * 1_000_000)
+        .max(suggested as u64)
+        .min(60_000_000) as u32;
 
     let stop = Arc::new(AtomicBool::new(false));
     let frames = Arc::new(AtomicU64::new(0));
@@ -157,6 +174,20 @@ pub fn start(request: RecordingRequest, output: PathBuf) -> Result<ActiveRecordi
                     }
                 };
 
+                // Built here, on the thread that will use it: GDI objects
+                // belong to their creating thread, and building it once rather
+                // than per frame is most of the reason a recording can keep up
+                // at all.
+                let mut grabber = match FrameGrabber::new(source) {
+                    Ok(grabber) => grabber,
+                    Err(err) => {
+                        let message = format!("could not start capturing frames: {err}");
+                        eprintln!("[record] {message}");
+                        let _ = encoder.finish();
+                        return Err(message);
+                    }
+                };
+
                 let interval = Duration::from_nanos(1_000_000_000 / fps as u64);
                 let began = Instant::now();
                 let mut index: u64 = 0;
@@ -178,9 +209,9 @@ pub fn start(request: RecordingRequest, output: PathBuf) -> Result<ActiveRecordi
                         continue;
                     }
 
-                    match win::capture_area_bgra(source) {
-                        Ok((pixels, _)) => {
-                            if let Err(err) = encoder.write_frame(&pixels) {
+                    match grabber.grab() {
+                        Ok(pixels) => {
+                            if let Err(err) = encoder.write_frame(pixels) {
                                 eprintln!("[record] {err}");
                                 break;
                             }

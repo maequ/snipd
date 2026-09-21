@@ -1,6 +1,6 @@
 [package]
 name = "snipd"
-version = "0.2.0"
+version = "0.2.1"
 description = "A screenshot tool for Windows that never loses a capture"
 authors = ["Snipd Contributors"]
 license = "MIT"

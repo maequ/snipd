@@ -387,6 +387,133 @@ pub fn capture_area(area: Bounds) -> Result<Frame, CaptureError> {
     })
 }
 
+/// A reusable capture context for recording.
+///
+/// Recording grabs the same rectangle over and over, so everything that does
+/// not change between frames is built once. [`grab`] creates a screen DC, a
+/// memory DC, a bitmap and an output buffer on *every* call, which is fine for
+/// a single screenshot and ruinous thirty times a second.
+///
+/// It also deliberately omits `CAPTUREBLT`. That flag is what makes layered and
+/// transparent windows appear in a still capture, but it forces a far more
+/// expensive path through GDI — enough, on a large region, to push a single
+/// frame past its slot and make the recorder drop frames on hardware that
+/// should have no trouble at all.
+///
+/// Not `Send`: GDI objects belong to the thread that made them, so a recording
+/// builds this on its own thread and keeps it there.
+pub struct FrameGrabber {
+    screen: ScreenDc,
+    mem: MemDc,
+    bitmap: Bitmap,
+    area: Bounds,
+    /// Reused between frames so a recording does not allocate megabytes per frame.
+    buffer: Vec<u8>,
+}
+
+impl FrameGrabber {
+    pub fn new(area: Bounds) -> Result<Self, CaptureError> {
+        let desktop = virtual_desktop().as_rect();
+        let area = area.intersect(desktop).ok_or(CaptureError::EmptyArea)?;
+        if area.is_empty() {
+            return Err(CaptureError::EmptyArea);
+        }
+
+        unsafe {
+            let screen = ScreenDc(GetDC(None));
+            if screen.0.is_invalid() {
+                return Err(CaptureError::Gdi("GetDC returned an invalid DC".into()));
+            }
+
+            let mem = MemDc(CreateCompatibleDC(Some(screen.0)));
+            if mem.0.is_invalid() {
+                return Err(CaptureError::Gdi("CreateCompatibleDC failed".into()));
+            }
+
+            let bitmap = Bitmap(CreateCompatibleBitmap(
+                screen.0,
+                area.width as i32,
+                area.height as i32,
+            ));
+            if bitmap.0.is_invalid() {
+                return Err(CaptureError::Gdi("CreateCompatibleBitmap failed".into()));
+            }
+
+            SelectObject(mem.0, HGDIOBJ(bitmap.0 .0));
+
+            let len = area.width as usize * area.height as usize * 4;
+            Ok(Self {
+                screen,
+                mem,
+                bitmap,
+                area,
+                buffer: vec![0u8; len],
+            })
+        }
+    }
+
+    pub fn area(&self) -> Bounds {
+        self.area
+    }
+
+    /// Grab one frame as top-down BGRA, into the buffer this grabber owns.
+    pub fn grab(&mut self) -> Result<&[u8], CaptureError> {
+        let width = self.area.width as i32;
+        let height = self.area.height as i32;
+
+        unsafe {
+            BitBlt(
+                self.mem.0,
+                0,
+                0,
+                width,
+                height,
+                Some(self.screen.0),
+                self.area.x,
+                self.area.y,
+                SRCCOPY,
+            )
+            .map_err(|e| CaptureError::Gdi(format!("BitBlt failed: {e}")))?;
+
+            let mut info = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: width,
+                    // Negative: top-down, which is what the encoder is told to
+                    // expect. Flipping this silently mirrors every frame.
+                    biHeight: -height,
+                    biPlanes: 1,
+                    biBitCount: 32,
+                    biCompression: BI_RGB.0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+
+            let copied = GetDIBits(
+                self.mem.0,
+                self.bitmap.0,
+                0,
+                height as u32,
+                Some(self.buffer.as_mut_ptr() as *mut c_void),
+                &mut info,
+                DIB_RGB_COLORS,
+            );
+            if copied == 0 {
+                return Err(CaptureError::Gdi("GetDIBits copied no scanlines".into()));
+            }
+
+            // Screen content comes back with a zero alpha byte, which the
+            // encoder would otherwise read as fully transparent.
+            for pixel in self.buffer.as_chunks_mut::<4>().0 {
+                pixel[3] = 255;
+            }
+        }
+
+        Ok(&self.buffer)
+    }
+}
+
 /// Capture into a raw top-down BGRA buffer, exactly as GDI produces it.
 ///
 /// Recording uses this rather than [`capture_area`]. Media Foundation wants

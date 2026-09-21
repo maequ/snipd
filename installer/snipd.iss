@@ -18,7 +18,7 @@
 ;   npm run tauri build -- --no-bundle
 
 #define AppName       "Snipd"
-#define AppVersion    "0.2.0"
+#define AppVersion    "0.2.1"
 #define AppPublisher  "Snipd Contributors"
 #define AppUrl        "https://github.com/maequ/snipd"
 #define AppExe        "snipd.exe"

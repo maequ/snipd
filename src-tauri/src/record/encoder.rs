@@ -24,8 +24,8 @@ use windows::Win32::Media::MediaFoundation::{
     IMFMediaType, IMFSinkWriter, MFCreateMediaType, MFCreateMemoryBuffer, MFCreateSample,
     MFCreateSinkWriterFromURL, MFMediaType_Video, MFStartup, MFVideoFormat_H264,
     MFVideoFormat_RGB32, MFVideoInterlace_Progressive, MFSTARTUP_NOSOCKET, MF_MT_AVG_BITRATE,
-    MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE, MF_MT_INTERLACE_MODE, MF_MT_MAJOR_TYPE,
-    MF_MT_PIXEL_ASPECT_RATIO, MF_MT_SUBTYPE, MF_VERSION,
+    MF_MT_DEFAULT_STRIDE, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE, MF_MT_INTERLACE_MODE,
+    MF_MT_MAJOR_TYPE, MF_MT_MPEG2_PROFILE, MF_MT_PIXEL_ASPECT_RATIO, MF_MT_SUBTYPE, MF_VERSION,
 };
 
 /// One hundred-nanosecond units per second, the unit Media Foundation counts in.
@@ -94,6 +94,14 @@ impl Encoder {
             out_type
                 .SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)
                 .map_err(|e| e.to_string())?;
+            // High profile rather than the encoder's default. It permits
+            // 8x8 transforms and CABAC, both of which matter disproportionately
+            // for screen content: sharp text edges are precisely what the
+            // simpler profiles smear. Every Windows H.264 decoder supports it.
+            const H264_PROFILE_HIGH: u32 = 100;
+            out_type
+                .SetUINT32(&MF_MT_MPEG2_PROFILE, H264_PROFILE_HIGH)
+                .map_err(|e| format!("setting the H.264 profile: {e}"))?;
             set_size(&out_type, MF_MT_FRAME_SIZE, target_width, target_height)?;
             set_ratio(&out_type, MF_MT_FRAME_RATE, fps, 1)?;
             set_ratio(&out_type, MF_MT_PIXEL_ASPECT_RATIO, 1, 1)?;
@@ -114,6 +122,16 @@ impl Encoder {
             in_type
                 .SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)
                 .map_err(|e| e.to_string())?;
+            // Without this the recording comes out upside down.
+            //
+            // Uncompressed RGB in Media Foundation is bottom-up by convention,
+            // so a frame handed over with no stride declared is interpreted as
+            // starting at the bottom row. The screen grab produces top-down
+            // frames, which a *positive* stride declares. Getting this wrong is
+            // not subtle: every frame is mirrored vertically.
+            in_type
+                .SetUINT32(&MF_MT_DEFAULT_STRIDE, source_width * 4)
+                .map_err(|e| format!("setting the frame stride: {e}"))?;
             set_size(&in_type, MF_MT_FRAME_SIZE, source_width, source_height)?;
             set_ratio(&in_type, MF_MT_FRAME_RATE, fps, 1)?;
             set_ratio(&in_type, MF_MT_PIXEL_ASPECT_RATIO, 1, 1)?;

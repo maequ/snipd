@@ -184,6 +184,62 @@
         display: inline;
       }
 
+      /*
+       * Hover labels, drawn by the page rather than by Windows.
+       *
+       * The `title` attribute was doing this job and doing it badly: the OS
+       * decides when to show it, how long to wait and how long to leave it up,
+       * and in a borderless always-on-top window it frequently flashed for a
+       * moment or never appeared at all. Drawing it here makes every tool
+       * announce itself the same way, immediately.
+       */
+      .tool {
+        position: relative;
+      }
+
+      .tool__tip {
+        position: absolute;
+        top: calc(100% + 10px);
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 5px 9px;
+        border-radius: 6px;
+        background: #ffffff;
+        color: #121214;
+        font-size: 12px;
+        font-weight: 500;
+        white-space: nowrap;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 90ms ease;
+      }
+
+      /* A small notch, so the label is clearly attached to its button. */
+      .tool__tip::before {
+        content: "";
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        border: 5px solid transparent;
+        border-bottom-color: #ffffff;
+      }
+
+      .tool:hover .tool__tip,
+      .tool:focus-visible .tool__tip {
+        opacity: 1;
+      }
+
+      /* The keyboard shortcut, kept quieter than the name. */
+      .tool__key {
+        margin-left: 6px;
+        opacity: 0.55;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .tool__tip { transition: none; }
+      }
+
       .divider {
         width: 1px;
         height: 22px;
@@ -223,6 +279,8 @@
           <rect x="3.5" y="5.5" width="17" height="13" rx="1.5" />
         </svg>
         <span class="tool__label">Rectangle</span>
+      
+        <span class="tool__tip" aria-hidden="true">Rectangle<span class="tool__key">1</span></span>
       </button>
 
       <button class="tool" type="button" data-mode="freeform" aria-pressed="false" title="Freeform (2)">
@@ -230,6 +288,8 @@
           <path d="M4 14c0-5 4-9 8-9s8 3 8 7-4 7-8 7c-3 0-5-1-5-3s2-3 4-3" />
         </svg>
         <span class="tool__label">Freeform</span>
+      
+        <span class="tool__tip" aria-hidden="true">Freeform<span class="tool__key">2</span></span>
       </button>
 
       <button class="tool" type="button" data-mode="window" aria-pressed="false" title="Window (3)">
@@ -238,6 +298,8 @@
           <path d="M3.5 9h17" />
         </svg>
         <span class="tool__label">Window</span>
+      
+        <span class="tool__tip" aria-hidden="true">Window<span class="tool__key">3</span></span>
       </button>
 
       <button class="tool" type="button" data-mode="fullscreen" aria-pressed="false" title="Full screen (4)">
@@ -246,6 +308,8 @@
           <path d="M8 20h8" />
         </svg>
         <span class="tool__label">Full screen</span>
+      
+        <span class="tool__tip" aria-hidden="true">Full screen<span class="tool__key">4</span></span>
       </button>
 
       <div class="divider"></div>
@@ -256,6 +320,8 @@
           <circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none" />
         </svg>
         <span class="tool__label">Record</span>
+      
+        <span class="tool__tip" aria-hidden="true">Record<span class="tool__key">5</span></span>
       </button>
 
       <div class="divider"></div>
@@ -266,12 +332,16 @@
           <path d="M12 9v4l2.5 2M9 2h6" />
         </svg>
         <span class="tool__label" id="delay-value">No delay</span>
+      
+        <span class="tool__tip" aria-hidden="true">Capture delay</span>
       </button>
 
       <button class="tool" id="close" type="button" title="Cancel (Esc)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
           <path d="M6 6l12 12M18 6L6 18" />
         </svg>
+      
+        <span class="tool__tip" aria-hidden="true">Cancel<span class="tool__key">Esc</span></span>
       </button>
     </div>
 

@@ -27,14 +27,20 @@ fn main() {
     let output = std::env::temp_dir().join("snipd-smoke-recording.mp4");
     let _ = std::fs::remove_file(&output);
 
-    // A modest region rather than the whole desktop: this is testing that the
-    // pipeline works, not how fast the machine is.
+    // The whole primary display by default, because that is the case that
+    // actually stresses the capture loop — a small region always kept up even
+    // when a full-screen recording was dropping frames badly. Pass a width to
+    // test something smaller.
     let desktop = win::virtual_desktop();
+    let limit = std::env::args()
+        .nth(2)
+        .and_then(|a| a.parse::<u32>().ok())
+        .unwrap_or(u32::MAX);
     let bounds = Bounds {
         x: desktop.x,
         y: desktop.y,
-        width: desktop.width.min(1280),
-        height: desktop.height.min(720),
+        width: desktop.width.min(limit),
+        height: desktop.height.min(limit),
     };
 
     println!("Snipd recording smoke test");
