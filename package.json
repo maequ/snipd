@@ -1,7 +1,9 @@
 {
   "name": "snipd",
-  "private": true,
   "version": "0.1.0",
+  "description": "A screenshot tool for Windows that never loses a capture",
+  "license": "MIT",
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",

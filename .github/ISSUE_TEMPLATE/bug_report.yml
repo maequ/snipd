@@ -1,0 +1,69 @@
+name: Bug report
+description: Something does not work the way it should
+labels: ["bug"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Most of the hard bugs in a screenshot tool are multi-monitor or DPI bugs,
+        so the display questions below matter more than they look.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Snipd version
+      description: Settings → About, or the version in the installer filename.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: Run `winver`, or Settings → System → About.
+      placeholder: "Windows 11 24H2"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: displays
+    attributes:
+      label: How many displays?
+      options:
+        - One
+        - Two
+        - Three or more
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scaling
+    attributes:
+      label: Display scaling
+      description: Settings → System → Display → Scale. If displays differ, say so below.
+      options:
+        - All at 100%
+        - All at the same scale above 100%
+        - Displays are at different scales
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: display-layout
+    attributes:
+      label: Display layout (optional but very helpful)
+      description: |
+        If you can build from source, this prints your exact layout:
+        `cd src-tauri && cargo run --example smoke_capture`
+      render: text

@@ -1,0 +1,32 @@
+name: Feature request
+description: Suggest something Snipd should do
+labels: ["enhancement"]
+
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: |
+        Describe the situation rather than the solution. Knowing what you are
+        actually trying to achieve often turns up a better answer than the
+        feature first imagined.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like Snipd to do?
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: principles
+    attributes:
+      label: Does this fit the project?
+      description: |
+        See CONTRIBUTING.md. Snipd is local-only and deliberately narrow.
+      options:
+        - label: This does not require an account, an upload, or a network call
+        - label: This does not risk a capture being lost

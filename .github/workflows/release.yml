@@ -1,0 +1,81 @@
+# Build and publish a release.
+#
+# Triggered by pushing a version tag, e.g. `git tag v0.1.0 && git push --tags`.
+# Produces the standalone executable and the Inno Setup installer, and attaches
+# both to a GitHub Release — which is what the README tells people to download.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  # Lets a release be produced without tagging, for testing the workflow itself.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (must already exist)"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - name: Build the application
+        run: npm run tauri build -- --no-bundle
+
+      # Not preinstalled on the runner. Inno Setup is what builds the wizard
+      # that collects first-run settings, so the installer cannot be produced
+      # without it.
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build the installer
+        run: '& "$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe" installer\snipd.iss'
+        shell: pwsh
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            installer/Output/Snipd-Setup-*.exe
+            src-tauri/target/release/snipd.exe
+          # Draft, so the release notes can be written before anyone sees it.
+          draft: true
+          generate_release_notes: true
+          body: |
+            ## Installing
+
+            Download `Snipd-Setup-*.exe` below and run it. The installer asks
+            where to save captures, how to name them, which format to use, what
+            should happen after a capture, and whether to copy to the clipboard
+            and start with Windows.
+
+            The installer is not code-signed, so Windows SmartScreen will warn
+            on first run. Choose **More info → Run anyway**.
+
+            `snipd.exe` is the same application without the installer, for
+            anyone who would rather not run one.
