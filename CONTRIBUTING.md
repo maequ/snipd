@@ -73,6 +73,21 @@ go wrong if it were written the obvious way — several of the trickier parts of
 this codebase exist because the obvious version was wrong, and the comment is
 what stops someone helpfully "fixing" it back.
 
+## Releasing
+
+Releases are cut by tagging:
+
+```bash
+git tag v0.4.0
+git push --tags
+```
+
+That builds the executable and the installer on a clean Windows runner and
+publishes them, with the notes taken from the matching section of
+[CHANGELOG.md](CHANGELOG.md). **Add that section before tagging** — the workflow
+fails if the version has none, deliberately, so that a release can never go out
+without saying what changed.
+
 ## Reporting a bug
 
 Include your Windows version, whether you have more than one display, and

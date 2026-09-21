@@ -73,6 +73,19 @@ jobs:
           & $iscc installer\snipd.iss
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
 
+      # Notes come from CHANGELOG.md, not from commit subjects.
+      #
+      # This step fails when the tag has no section in the changelog, and that
+      # is deliberate: a release going out with no description of what changed
+      # should stop the build rather than quietly publish boilerplate.
+      - name: Collect the release notes
+        shell: bash
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          node scripts/release-notes.mjs "$tag" > release-notes.md
+          echo "--- notes for $tag ---"
+          cat release-notes.md
+
       - name: Publish the release
         uses: softprops/action-gh-release@v2
         with:
@@ -83,17 +96,4 @@ jobs:
           # repository owner, so tagging a version would leave the README
           # pointing at an empty Releases page.
           draft: false
-          generate_release_notes: true
-          body: |
-            ## Installing
-
-            Download `Snipd-Setup-*.exe` below and run it. The installer asks
-            where to save captures, how to name them, which format to use, what
-            should happen after a capture, and whether to copy to the clipboard
-            and start with Windows.
-
-            The installer is not code-signed, so Windows SmartScreen will warn
-            on first run. Choose **More info → Run anyway**.
-
-            `snipd.exe` is the same application without the installer, for
-            anyone who would rather not run one.
+          body_path: release-notes.md

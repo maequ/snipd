@@ -211,6 +211,12 @@ Graphics Capture path can be added without changing callers.
 - [x] Inno Setup installer with first-run configuration
 - [x] Screen recording, with sound, frame rate and resolution settings
 
+## Changelog
+
+Every release is described in [CHANGELOG.md](CHANGELOG.md), which is also what
+the release notes on GitHub are generated from — so what a release says it
+changed and what the repository says it changed cannot drift apart.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). It covers the setup, what CI checks, and
