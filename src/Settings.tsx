@@ -410,7 +410,9 @@ export default function SettingsPanel({
             <Group title="How recording works">
               <p className="settings__note settings__note--tight">
                 Open the capture overlay, choose <strong>Record</strong>, then drag the area you
-                want. A small bar appears with the elapsed time and a stop button.
+                want. A small bar appears with the elapsed time and a stop button. If that bar is
+                ever not where you expect it, <strong>Stop recording</strong> in the tray menu does
+                the same thing.
               </p>
               <p className="settings__note settings__note--tight">
                 Recordings are encoded with the H.264 encoder built into Windows, so there is

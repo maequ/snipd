@@ -17,6 +17,12 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         MenuItem::with_id(app, "fullscreen", "Capture full screen", true, None::<&str>)?;
     let capture_window =
         MenuItem::with_id(app, "window", "Capture active window", true, None::<&str>)?;
+    // Always present rather than added and removed as recording starts and
+    // stops. The floating bar is a separate window, and a recording that cannot
+    // be stopped because its bar failed to appear would quietly fill a disk —
+    // so there is a second way to stop one that depends on nothing but the tray.
+    let stop_recording =
+        MenuItem::with_id(app, "stop-recording", "Stop recording", true, None::<&str>)?;
     let open = MenuItem::with_id(app, "open", "Open Snipd", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Snipd", true, None::<&str>)?;
 
@@ -26,6 +32,8 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
             &new_capture,
             &capture_screen,
             &capture_window,
+            &PredefinedMenuItem::separator(app)?,
+            &stop_recording,
             &PredefinedMenuItem::separator(app)?,
             &open,
             &PredefinedMenuItem::separator(app)?,
@@ -48,6 +56,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
             "capture" => overlay::begin_capture_detached(app, "rectangle"),
             "fullscreen" => crate::capture_immediate(app, crate::ImmediateMode::FullScreen),
             "window" => crate::capture_immediate(app, crate::ImmediateMode::ActiveWindow),
+            "stop-recording" => stop_recording_from_tray(app),
             "open" => show_main_window(app),
             "quit" => app.exit(0),
             _ => {}
@@ -67,6 +76,37 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Stop a recording from the tray.
+///
+/// Does nothing when nothing is recording, which is why the menu item can stay
+/// permanently enabled: an item that is usually greyed out is one people stop
+/// looking at, and this is the fallback that has to work when the floating bar
+/// has not.
+fn stop_recording_from_tray(app: &AppHandle) {
+    let app = app.clone();
+    // Finalising an MP4 writes its index, which is slow enough that doing it on
+    // the menu thread would visibly hang the tray.
+    tauri::async_runtime::spawn_blocking(move || {
+        let recording = {
+            let state = app.state::<crate::AppState>();
+            let Ok(mut slot) = state.recording.lock() else {
+                return;
+            };
+            slot.take()
+        };
+
+        let Some(active) = recording else {
+            return;
+        };
+
+        crate::record::hide_bar(&app);
+        match active.stop() {
+            Ok(outcome) => crate::announce_recording(&app, &outcome),
+            Err(err) => eprintln!("[record] stopping from the tray failed: {err}"),
+        }
+    });
+}
+
 /// Reveal and focus the main window, recreating it if it is gone.
 ///
 /// The recreation path is not a nicety. Closing the window only hides it while
@@ -77,6 +117,9 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
 /// window again. That looks exactly like "it won't open".
 pub fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
+        // Un-minimise before showing, so a window that was minimised rather
+        // than hidden comes back at its real size instead of being shown still
+        // iconic.
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();

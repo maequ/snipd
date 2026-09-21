@@ -61,6 +61,12 @@ thiserror = "2"
 # which is roughly 4x and markedly slower to parse.
 base64 = "0.22"
 
+# Deleting a capture sends it to the Recycle Bin rather than unlinking it. An
+# app whose whole promise is that it never loses a capture has no business
+# making deletion unrecoverable, and a mis-click on a small button in a grid is
+# exactly the kind of accident that promise should cover.
+trash = "5"
+
 # Direct Win32 access for the capture backend. See src/capture/win.rs for why
 # this is preferred over a cross-platform capture crate.
 [target.'cfg(windows)'.dependencies.windows]

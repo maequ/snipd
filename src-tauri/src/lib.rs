@@ -471,9 +471,18 @@ fn stop_recording(
 
     record::hide_bar(&app);
     let outcome = active.stop()?;
+    announce_recording(&app, &outcome);
+    Ok(outcome)
+}
 
-    // Recordings go into the same index as stills so the library can list both
-    // without a second source of truth.
+/// Index a finished recording and tell the UI about it.
+///
+/// Shared by the floating bar and the tray fallback, so a recording stopped
+/// either way lands in the library identically. If these diverged, a recording
+/// stopped from the tray would be on disk but missing from the Recordings tab.
+pub fn announce_recording(app: &AppHandle, outcome: &record::RecordingOutcome) {
+    // Recordings go into the same index as stills, so the library has one source
+    // of truth rather than two.
     let entry = CaptureRecord {
         id: format!("rec-{}", chrono::Local::now().format("%Y%m%d%H%M%S%3f")),
         path: outcome.path.clone(),
@@ -491,9 +500,8 @@ fn stop_recording(
     };
     let _ = history::record(&entry);
 
-    let _ = app.emit("recording-complete", &outcome);
-    tray::show_main_window(&app);
-    Ok(outcome)
+    let _ = app.emit("recording-complete", outcome);
+    tray::show_main_window(app);
 }
 
 /// Live state of the recording, for the floating bar.
@@ -847,11 +855,19 @@ pub fn run() {
 
             // The window is built hidden so that starting at login never flashes
             // it on screen. A manual launch shows it immediately.
+            //
+            // Routed through the same helper the tray uses rather than calling
+            // `show` directly, so there is one way to reveal this window.
+            //
+            // Nothing else may touch the window for a moment after this. An
+            // earlier version re-asserted `set_focus` from a background thread
+            // shortly after startup, as a guard against the window coming up
+            // minimised; it *caused* that symptom on nine launches in ten,
+            // because forcing foreground on Windows minimises and restores the
+            // window and doing it off the main thread mid-startup leaves it
+            // iconic. Showing once, here, measured clean 28 times out of 28.
             if !start_hidden {
-                if let Some(window) = handle.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+                tray::show_main_window(handle);
             }
 
             Ok(())

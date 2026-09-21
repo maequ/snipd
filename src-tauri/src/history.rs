@@ -584,7 +584,20 @@ pub fn delete(path: &Path, save_directory: &Path) -> Result<(), String> {
         let _ = fs::remove_file(thumbnail_dir().join(format!("{key}.jpg")));
     }
 
-    fs::remove_file(&canonical).map_err(|e| format!("could not delete: {e}"))?;
+    // To the Recycle Bin, not unlinked.
+    //
+    // This app exists because screenshots get lost, so making its own delete
+    // button unrecoverable would be indefensible — a mis-click on a small
+    // button in a dense grid is precisely the accident worth covering. If the
+    // Recycle Bin is unavailable (a network share, or it is disabled for the
+    // drive), the delete fails and says so rather than quietly falling back to
+    // destroying the file.
+    trash::delete(&canonical).map_err(|e| {
+        format!(
+            "could not move {} to the Recycle Bin: {e}",
+            canonical.display()
+        )
+    })?;
     Ok(())
 }
 
@@ -673,6 +686,7 @@ mod tests {
         age(&old, 40);
 
         assert_eq!(prune(root.path(), 30).unwrap(), 1);
+        // Gone from the folder — it is in the Recycle Bin, not destroyed.
         assert!(!old.exists(), "a capture past the window should be gone");
         assert!(fresh.exists(), "a recent capture must be kept");
     }

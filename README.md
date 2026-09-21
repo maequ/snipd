@@ -23,6 +23,7 @@ behaviour rather than in presentation.
 | Thin annotation tools | Pen, arrows, shapes, text, crop, and redaction for hiding sensitive details |
 | Cannot keep a shot visible while you work | Pin any capture as a floating always-on-top window |
 | Clipboard copy is inconsistent | Copying retries while the clipboard is locked instead of silently failing |
+| Deleting is unrecoverable | Deleting moves a capture to the Recycle Bin, never unlinks it |
 | Poor multi-monitor behaviour | One coordinate space across all displays, including mixed DPI |
 
 ## Features
@@ -37,8 +38,9 @@ disk the moment you release the mouse. Either way the file is written
 immediately; the choice only changes what happens next.
 
 **Recording** — choose Record in the same overlay, drag an area, and a small bar
-shows the elapsed time with a stop button. Encoded with the H.264 encoder built
-into Windows, so there is nothing extra to install. Frame rate, resolution and
+shows the elapsed time with a stop button; the tray menu can stop one too, so a
+recording is never stuck running. Encoded with the H.264 encoder built into
+Windows, so there is nothing extra to install. Frame rate, resolution and
 bitrate are all configurable.
 
 **Library** — every capture, searchable by filename and filterable by date, with

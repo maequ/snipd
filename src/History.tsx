@@ -300,7 +300,7 @@ export default function History({
                         className="danger"
                         onClick={() => void remove(entry.path)}
                       >
-                        Delete for good
+                        Move to Recycle Bin
                       </button>
                       <button type="button" onClick={() => setPendingDelete(null)}>
                         Keep
