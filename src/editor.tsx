@@ -34,8 +34,13 @@ export interface EditorProps {
    * already have been shared is never rewritten underneath them.
    */
   reviewing: boolean;
-  /** Return to the library. */
-  onClose: () => void;
+  /**
+   * Return to the library.
+   *
+   * Given the saved path when a review was kept, so the library can confirm it
+   * by name instead of the editor closing with nothing said.
+   */
+  onClose: (savedPath?: string) => void;
 }
 
 interface Pt {
@@ -252,6 +257,12 @@ export default function Editor({ imageUrl, fileName, path, reviewing, onClose }:
     setStatus(null);
 
     const img = new Image();
+    // Requested in CORS mode, and the protocol answers with
+    // Access-Control-Allow-Origin. Both halves are required: without them the
+    // image is cross-origin, the canvas it is drawn onto becomes tainted, and
+    // every read of that canvas throws a SecurityError — which is what made
+    // saving an annotated capture fail without any visible error.
+    img.crossOrigin = "anonymous";
     img.onload = () => {
       const canvas = canvasRef.current;
       if (canvas) {
@@ -392,31 +403,60 @@ export default function Editor({ imageUrl, fileName, path, reviewing, onClose }:
     return () => window.removeEventListener("keydown", onKey);
   }, [undo, redoLast, typing, onClose]);
 
-  /** Flatten to a PNG, honouring the crop rectangle if one is set. */
-  const exportPng = useCallback(async (): Promise<string | null> => {
+  /**
+   * Flatten to a PNG, honouring the crop rectangle if one is set.
+   *
+   * Throws rather than returning null for anything that is a genuine failure.
+   * Returning a bare null made every cause — no image, a zero-sized crop, a
+   * tainted canvas — look identical to the caller, which reported all of them
+   * as "Nothing to save." while the real problem went unnamed.
+   */
+  const exportPng = useCallback(async (): Promise<string> => {
     const canvas = canvasRef.current;
-    if (!canvas) return null;
+    if (!canvas) throw new Error("The editor canvas is not ready yet.");
 
     // Re-render without the crop chrome, so the dimming never ends up baked in.
     const out = document.createElement("canvas");
     const region = crop
       ? norm(crop.a, crop.b)
       : { x: 0, y: 0, w: canvas.width, h: canvas.height };
-    if (region.w < 1 || region.h < 1) return null;
+    if (region.w < 1 || region.h < 1) {
+      throw new Error("That crop is too small to save.");
+    }
 
     out.width = Math.round(region.w);
     out.height = Math.round(region.h);
     const octx = out.getContext("2d");
     const img = imageRef.current;
-    if (!octx || !img) return null;
+    if (!octx) throw new Error("This system could not provide a drawing canvas.");
+    if (!img) throw new Error("The capture has not finished loading.");
 
     octx.translate(-region.x, -region.y);
     octx.drawImage(img, 0, 0);
     for (const s of shapes) if (s.t === "redact") pixelate(octx, s.a, s.b);
     for (const s of shapes) drawShape(octx, s);
 
-    const blob = await new Promise<Blob | null>((r) => out.toBlob(r, "image/png"));
-    if (!blob) return null;
+    let blob: Blob | null;
+    try {
+      blob = await new Promise<Blob | null>((resolve, reject) => {
+        try {
+          out.toBlob(resolve, "image/png");
+        } catch (err) {
+          reject(err);
+        }
+      });
+    } catch (err) {
+      // Reading a canvas that has a cross-origin image drawn on it throws a
+      // SecurityError. That should no longer be reachable, but if it ever is,
+      // the message must say what actually went wrong rather than leaving
+      // someone staring at raw DOM wording.
+      const detail = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `Could not read the edited image back from the canvas (${detail}). ` +
+          "This is a bug in Snipd, not something you did.",
+      );
+    }
+    if (!blob) throw new Error("The edited image could not be encoded as a PNG.");
 
     const bytes = new Uint8Array(await blob.arrayBuffer());
     let binary = "";
@@ -446,25 +486,30 @@ export default function Editor({ imageUrl, fileName, path, reviewing, onClose }:
 
   const save = async () => {
     setBusy(true);
+    setStatus(null);
     try {
       const png = await exportPng();
-      if (!png) {
-        setStatus("Nothing to save.");
-        return;
-      }
 
       if (reviewing) {
-        await invoke<string>("apply_edit", { path, png, newName: name.trim() || null });
-        // Reviewing is a step in taking a capture, so finishing it returns to
-        // the library rather than leaving the editor open over nothing.
-        onClose();
+        const saved = await invoke<string>("apply_edit", {
+          path,
+          png,
+          newName: name.trim() || null,
+        });
+        // Closing is the confirmation: reviewing is a step in taking a capture,
+        // and the library it returns to shows the capture saved under its final
+        // name. Handing back the path means the caller can say so precisely
+        // rather than the editor simply vanishing.
+        onClose(saved);
         return;
       }
 
       const record = await invoke<{ fileName: string }>("save_edited", { png });
       setStatus(`Saved a copy as ${record.fileName}`);
     } catch (err) {
-      setStatus(String(err));
+      // Never swallowed. Saving failing without a word is what made an
+      // annotated capture look like it had been kept when it had not.
+      setStatus(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
@@ -543,7 +588,7 @@ export default function Editor({ imageUrl, fileName, path, reviewing, onClose }:
               />
             </label>
           )}
-          <button type="button" onClick={onClose}>
+          <button type="button" onClick={() => onClose()}>
             {reviewing ? "Discard changes" : "Back to library"}
           </button>
           <button type="button" onClick={() => void copyToClipboard()} disabled={busy}>

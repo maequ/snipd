@@ -53,9 +53,25 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
+      # Looked up rather than hard-coded. `$env:ProgramFiles(x86)` does not work:
+      # PowerShell reads it as `$env:ProgramFiles` followed by a literal
+      # "(x86)", producing a path that does not exist. The brace form is
+      # required, and checking both Program Files roots survives Inno Setup
+      # being installed as either architecture.
       - name: Build the installer
-        run: '& "$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe" installer\snipd.iss'
         shell: pwsh
+        run: |
+          $candidates = @(
+            (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'),
+            (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe')
+          )
+          $iscc = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) {
+            throw "ISCC.exe not found. Looked in: $($candidates -join ', ')"
+          }
+          Write-Host "Using $iscc"
+          & $iscc installer\snipd.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
 
       - name: Publish the release
         uses: softprops/action-gh-release@v2

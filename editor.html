@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Snipd editor</title>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <!--
+      A classic, non-module script that paints a message immediately.
+
+      If the window ever shows this text and nothing else, the page loaded but
+      the module bundle did not execute — which is a completely different fault
+      from the bundle running and throwing, and the two are impossible to tell
+      apart from a blank white window. An earlier version of this editor failed
+      exactly that way and cost a long time to diagnose.
+    -->
+    <script>
+      (function () {
+        var root = document.getElementById("root");
+        root.innerHTML =
+          '<div style="padding:24px;font:13px/1.6 system-ui,sans-serif;color:#8e8e93">Opening the editor…</div>';
+        window.setTimeout(function () {
+          if (root.getAttribute("data-mounted") === "yes") return;
+          root.innerHTML =
+            '<div style="padding:24px;font:13px/1.6 system-ui,sans-serif;color:#e8918f">' +
+            "<strong>The editor did not start.</strong><br>" +
+            "The page loaded but its script never ran. Please report this." +
+            "</div>";
+        }, 4000);
+      })();
+    </script>
+
+    <script type="module" src="/src/editor-window.tsx"></script>
+  </body>
+</html>

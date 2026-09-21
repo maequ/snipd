@@ -323,20 +323,36 @@ where
     match &outcome {
         Ok(record) => {
             crate::announce_capture(app, record);
-            // The editor now lives inside the main window rather than in one of
-            // its own, so bringing that window up is all this needs to do. It
-            // was hidden to keep it out of the shot, so it has to be brought
-            // back deliberately.
-            crate::tray::show_main_window(app);
+
+            // The main window is only brought back when nothing else is about
+            // to take its place. It was hidden so it would stay out of the
+            // shot, and when the capture is going to open in the editor window
+            // the library appearing as well is just a second window nobody
+            // asked for — which is exactly how taking one screenshot ended up
+            // feeling like the whole application had opened.
+            if !reviews_captures(app) {
+                crate::tray::show_main_window(app);
+            }
         }
         Err(message) => {
             let _ = app.emit("capture-failed", message);
+            // A failure has nowhere else to be reported, so the window comes
+            // back regardless.
             crate::tray::show_main_window(app);
         }
     }
 
     close_overlay(app);
     outcome
+}
+
+/// Whether a capture opens in the editor rather than simply being saved.
+fn reviews_captures(app: &AppHandle) -> bool {
+    let state = app.state::<AppState>();
+    let Ok(settings) = state.settings.lock() else {
+        return false;
+    };
+    settings.capture.after == crate::config::AfterCapture::Review
 }
 
 fn clear_session(app: &AppHandle) {

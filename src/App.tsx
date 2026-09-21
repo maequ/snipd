@@ -10,8 +10,7 @@ import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import History, { type HistoryEntry } from "./History";
-import Editor from "./editor";
+import History from "./History";
 import SettingsPanel, { type Settings } from "./Settings";
 import Stats from "./Stats";
 import "./App.css";
@@ -55,17 +54,23 @@ export default function App() {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [refreshToken, setRefreshToken] = useState(0);
   const [recording, setRecording] = useState(false);
+  /** Confirmation shown after a reviewed capture is kept. */
+  const [saved, setSaved] = useState<string | null>(null);
 
   /**
-   * The capture open in the editor.
+   * Hand a capture to the editor window.
    *
-   * The editor is a view in this window rather than a window of its own: a
-   * separately created window would not load its bundle at all and rendered
-   * blank, and this side-steps that entirely.
+   * The editor is a window of its own rather than a view inside this one, so
+   * taking a capture puts an editor in front of you without turning the
+   * library into something else and back again.
    */
-  const [editing, setEditing] = useState<HistoryEntry | null>(null);
-  /** True when the editor was opened by a capture rather than from the library. */
-  const [reviewing, setReviewing] = useState(false);
+  const openEditor = useCallback(async (path: string, reviewing: boolean) => {
+    try {
+      await invoke("open_editor", { path, reviewing });
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
 
   const loadSettings = useCallback(async () => {
     try {
@@ -97,26 +102,13 @@ export default function App() {
       const record = event.payload;
       setLast(record);
       setError(null);
+      setSaved(null);
       setRefreshToken((token) => token + 1);
 
       // The capture is already on disk either way. Reviewing only decides
-      // whether it opens for mark-up and renaming first.
-      if (settings?.capture.after === "review" && record.fullUrl) {
-        setReviewing(true);
-        setEditing({
-          path: record.path,
-          fileName: record.fileName,
-          takenAtMs: Date.now(),
-          bytes: 0,
-          width: record.width,
-          height: record.height,
-          kind: null,
-          source: null,
-          thumbnailUrl: "",
-          fullUrl: record.fullUrl,
-          isVideo: false,
-          durationMs: null,
-        });
+      // whether an editor opens on it first.
+      if (settings?.capture.after === "review") {
+        void openEditor(record.path, true);
       }
     });
 
@@ -136,12 +128,23 @@ export default function App() {
       );
     });
 
+    // The editor lives in its own window, so the library learns how an edit
+    // ended by event rather than by a callback.
+    const edited = listen<string | null>("editor-finished", (event) => {
+      setRefreshToken((token) => token + 1);
+      if (event.payload) {
+        const name = event.payload.split("\\").pop()?.split("/").pop() ?? event.payload;
+        setSaved(`Kept ${name}`);
+      }
+    });
+
     return () => {
       void completed.then((un) => un());
       void failed.then((un) => un());
       void recorded.then((un) => un());
+      void edited.then((un) => un());
     };
-  }, [settings]);
+  }, [settings, openEditor]);
 
   const newCapture = useCallback(async () => {
     setError(null);
@@ -153,24 +156,6 @@ export default function App() {
       setError(String(err));
     }
   }, []);
-
-  const closeEditor = useCallback(() => {
-    setEditing(null);
-    setReviewing(false);
-    setRefreshToken((token) => token + 1);
-  }, []);
-
-  if (editing) {
-    return (
-      <Editor
-        imageUrl={editing.fullUrl}
-        fileName={editing.fileName}
-        path={editing.path}
-        reviewing={reviewing}
-        onClose={closeEditor}
-      />
-    );
-  }
 
   return (
     <main className="app">
@@ -225,7 +210,9 @@ export default function App() {
         </div>
       )}
 
-      {last && tab === "library" && (
+      {saved && tab === "library" && <p className="banner banner--ok">{saved}</p>}
+
+      {last && !saved && tab === "library" && (
         <p className="banner banner--ok">
           Saved {last.fileName} · {last.width} x {last.height}
           {last.copiedToClipboard ? " · copied to clipboard" : ""}
@@ -239,10 +226,7 @@ export default function App() {
         <History
           media="image"
           refreshToken={refreshToken}
-          onEdit={(entry) => {
-            setReviewing(false);
-            setEditing(entry);
-          }}
+          onEdit={(entry) => void openEditor(entry.path, false)}
         />
       )}
 
@@ -250,10 +234,7 @@ export default function App() {
         <History
           media="video"
           refreshToken={refreshToken}
-          onEdit={(entry) => {
-            setReviewing(false);
-            setEditing(entry);
-          }}
+          onEdit={(entry) => void openEditor(entry.path, false)}
         />
       )}
 

@@ -48,6 +48,21 @@ pub struct AppState {
     /// The recording in progress, if any. Only one at a time: two recordings
     /// would compete for the same encoder and produce two half-speed videos.
     pub recording: Mutex<Option<record::ActiveRecording>>,
+    /// Which capture the editor window is showing.
+    ///
+    /// Held here rather than passed in the editor's URL: a Windows path in a
+    /// query string has to survive escaping intact, and anything able to reach
+    /// that page could otherwise name a file of its own choosing.
+    pub editing: Mutex<Option<EditTarget>>,
+}
+
+/// What the editor window was opened on.
+#[derive(Debug, Clone)]
+pub struct EditTarget {
+    pub path: std::path::PathBuf,
+    /// True when opened by a fresh capture, which is what decides whether
+    /// saving keeps the capture or writes a copy.
+    pub reviewing: bool,
 }
 
 /// A capture taken without showing the overlay.
@@ -305,6 +320,108 @@ fn save_edited(png: String, state: State<'_, AppState>) -> Result<CaptureRecord,
         Some("Edited".to_string()),
         &mut settings,
     )
+}
+
+/// Window label for the editor.
+const EDITOR_LABEL: &str = "editor";
+
+/// What the editor window needs in order to draw itself.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EditorTarget {
+    path: String,
+    file_name: String,
+    image_url: String,
+    reviewing: bool,
+    theme: config::Theme,
+}
+
+/// Open a capture in the editor window, creating it if needed.
+///
+/// A window of its own, rather than the library turning into an editor: taking
+/// a capture should put an editor in front of you the way the Snipping Tool
+/// does, and leave whatever you already had open alone.
+#[tauri::command]
+fn open_editor(app: AppHandle, path: String, reviewing: bool) -> Result<(), String> {
+    let target = std::path::PathBuf::from(&path);
+    if !target.exists() {
+        return Err(format!("{path} no longer exists"));
+    }
+
+    {
+        let state = app.state::<AppState>();
+        let mut editing = state
+            .editing
+            .lock()
+            .map_err(|_| "editor lock poisoned".to_string())?;
+        *editing = Some(EditTarget {
+            path: target,
+            reviewing,
+        });
+    }
+
+    // Reused when already open, so a second capture replaces what is on screen
+    // instead of stacking editors up.
+    if let Some(window) = app.get_webview_window(EDITOR_LABEL) {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        let _ = window.emit("editor-target-changed", ());
+        return Ok(());
+    }
+
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        EDITOR_LABEL,
+        tauri::WebviewUrl::App("editor.html".into()),
+    )
+    .title("Snipd editor")
+    .inner_size(1040.0, 720.0)
+    .min_inner_size(620.0, 460.0)
+    .center()
+    .build()
+    .map_err(|e| format!("could not open the editor: {e}"))?;
+
+    Ok(())
+}
+
+/// What the editor window should show.
+#[tauri::command]
+fn editor_target(state: State<'_, AppState>) -> Result<EditorTarget, String> {
+    let editing = state
+        .editing
+        .lock()
+        .map_err(|_| "editor lock poisoned".to_string())?;
+    let target = editing
+        .as_ref()
+        .ok_or_else(|| "no capture is open in the editor".to_string())?;
+
+    let theme = state
+        .settings
+        .lock()
+        .map(|s| s.theme)
+        .unwrap_or(config::Theme::System);
+
+    Ok(EditorTarget {
+        file_name: target
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        image_url: history::media_url(&target.path),
+        path: target.path.to_string_lossy().into_owned(),
+        reviewing: target.reviewing,
+        theme,
+    })
+}
+
+/// The editor window is done; refresh the library behind it.
+#[tauri::command]
+fn editor_finished(app: AppHandle, saved_path: Option<String>) {
+    if let Ok(mut editing) = app.state::<AppState>().editing.lock() {
+        *editing = None;
+    }
+    let _ = app.emit("editor-finished", saved_path);
 }
 
 /// Totals for the library summary strip.
@@ -732,6 +849,19 @@ fn serve_image(app: &AppHandle, path: &str, query: Option<&str>) -> tauri::http:
             // Keys already change when a file does, but this removes any chance
             // of a stale frame or thumbnail surviving in the webview cache.
             .header("Cache-Control", "no-store")
+            // Without this the editor cannot save.
+            //
+            // These images are served from `snipd.localhost`, which is a
+            // different origin from the page. Drawing a cross-origin image onto
+            // a canvas *taints* it, and every attempt to read the pixels back —
+            // `toBlob`, `toDataURL`, `getImageData` — then throws a SecurityError.
+            // The editor's whole export path is a canvas read, so annotating a
+            // capture and pressing Save failed silently.
+            //
+            // Allowing any origin is safe here: the scheme is registered by this
+            // application, only ever serves files out of the user's own save
+            // folder, and is not reachable from outside the webview.
+            .header("Access-Control-Allow-Origin", "*")
             .body(body)
             .unwrap_or_else(|_| empty(500)),
         None => empty(404),
@@ -795,6 +925,7 @@ pub fn run() {
             shortcut_warnings: Mutex::new(Vec::new()),
             pins: Mutex::new(std::collections::HashMap::new()),
             recording: Mutex::new(None),
+            editing: Mutex::new(None),
         })
         // Serves the overlay's frozen backdrop straight from memory. Going via
         // disk or base64-over-IPC would both add a visible delay before the
@@ -893,6 +1024,9 @@ pub fn run() {
             start_recording,
             stop_recording,
             recording_status,
+            open_editor,
+            editor_target,
+            editor_finished,
             start_recording_from_overlay,
             update_settings,
             pin::pin_capture,
