@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Core permissions for the main window, capture overlay, editor and pinned captures.",
   "windows": ["main", "overlay", "editor", "pin-*"],
-  "permissions": ["core:default", "opener:default", "dialog:default"]
+  "permissions": ["core:default", "opener:default", "dialog:default", "notification:default"]
 }

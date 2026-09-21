@@ -190,6 +190,8 @@ export default function Editor({ imageUrl, fileName, onClose }: EditorProps) {
 
   const dragging = useRef(false);
   const startPt = useRef<Pt>({ x: 0, y: 0 });
+  const saveRef = useRef<(() => Promise<void>) | null>(null);
+  const copyRef = useRef<(() => Promise<void>) | null>(null);
 
   /** Repaint everything from the shape list. */
   const render = useCallback(() => {
@@ -358,6 +360,14 @@ export default function Editor({ imageUrl, fileName, onClose }: EditorProps) {
         if (e.shiftKey) redoLast();
         else undo();
       }
+      if (e.ctrlKey && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        void saveRef.current?.();
+      }
+      if (e.ctrlKey && e.key.toLowerCase() === "c") {
+        e.preventDefault();
+        void copyRef.current?.();
+      }
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
@@ -399,6 +409,23 @@ export default function Editor({ imageUrl, fileName, onClose }: EditorProps) {
     return btoa(binary);
   }, [crop, shapes]);
 
+  const copyToClipboard = async () => {
+    setBusy(true);
+    try {
+      const png = await exportPng();
+      if (!png) {
+        setStatus("Nothing to copy.");
+        return;
+      }
+      await invoke("copy_edited", { png });
+      setStatus("Copied to the clipboard.");
+    } catch (err) {
+      setStatus(String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const save = async () => {
     setBusy(true);
     try {
@@ -415,6 +442,9 @@ export default function Editor({ imageUrl, fileName, onClose }: EditorProps) {
       setBusy(false);
     }
   };
+
+  saveRef.current = save;
+  copyRef.current = copyToClipboard;
 
   const cursor = tool === "text" ? "text" : "crosshair";
 
@@ -477,8 +507,11 @@ export default function Editor({ imageUrl, fileName, onClose }: EditorProps) {
           <button type="button" onClick={onClose}>
             Back to library
           </button>
+          <button type="button" onClick={() => void copyToClipboard()} disabled={busy}>
+            Copy
+          </button>
           <button type="button" className="primary" onClick={() => void save()} disabled={busy}>
-            {busy ? "Saving…" : "Save a copy"}
+            {busy ? "Working…" : "Save a copy"}
           </button>
         </div>
       </div>

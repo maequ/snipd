@@ -1,71 +1,11 @@
 /*
- * Working styles, not the finished look.
+ * Main window: library and settings.
  *
- * The app's visual identity is a later phase and will be designed deliberately
- * rather than accumulated. Everything here is neutral on purpose so it does not
- * quietly become the design by default.
+ * Layout only — every colour comes from tokens.css. The chrome is deliberately
+ * quiet so the thumbnails are the brightest thing on screen.
  */
 
-:root {
-  color-scheme: light dark;
-
-  --bg: #f5f6f8;
-  --surface: #ffffff;
-  --surface-sunken: #eceef1;
-  --border: #d9dde3;
-  --text: #191d23;
-  --text-muted: #5a626e;
-  --accent: #2f5fd8;
-  --accent-text: #ffffff;
-
-  --ok-bg: #edf6ee;
-  --ok-border: #b6d8bb;
-  --ok-text: #1e5128;
-
-  --warn-bg: #fdf5e6;
-  --warn-border: #e3c88a;
-  --warn-text: #7a5510;
-
-  --error-bg: #fdf1f1;
-  --error-border: #e2b2b2;
-  --error-text: #8a1f1f;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #131519;
-    --surface: #1b1e24;
-    --surface-sunken: #23272e;
-    --border: #2e333c;
-    --text: #e7e9ec;
-    --text-muted: #9aa2ae;
-    --accent: #6f9bff;
-    --accent-text: #0d1016;
-
-    --ok-bg: #16251a;
-    --ok-border: #2f5136;
-    --ok-text: #a8d9b0;
-
-    --warn-bg: #2a2214;
-    --warn-border: #5b4a26;
-    --warn-text: #e5c682;
-
-    --error-bg: #2a1919;
-    --error-border: #5a2e2e;
-    --error-text: #f0b4b4;
-  }
-}
-
-* {
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--text);
-  font: 14px/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
-}
+@import "./tokens.css";
 
 .app {
   max-width: 1100px;
@@ -79,19 +19,20 @@ body {
   justify-content: space-between;
   gap: 20px;
   flex-wrap: wrap;
-  margin-bottom: 20px;
+  margin-bottom: 18px;
 }
 
 .app__header h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .app__subtitle {
   margin: 4px 0 0;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 12.5px;
   word-break: break-word;
 }
 
@@ -107,39 +48,33 @@ body {
   font-size: 12px;
 }
 
-button {
-  padding: 7px 13px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
+/* --- tabs --- */
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tabs button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 8px 14px;
+}
+
+.tabs button:hover {
   color: var(--text);
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-button:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-button.primary {
-  padding: 9px 20px;
   border-color: transparent;
-  background: var(--accent);
-  color: var(--accent-text);
-  font-size: 14px;
-  font-weight: 500;
 }
 
-button.primary:hover {
-  color: var(--accent-text);
-  filter: brightness(1.08);
-}
-
-button.danger {
-  border-color: var(--error-border);
-  color: var(--error-text);
+.tabs button[aria-pressed="true"] {
+  background: transparent;
+  color: var(--text);
+  border-bottom-color: var(--accent);
 }
 
 /* --- banners --- */
@@ -147,8 +82,9 @@ button.danger {
 .banner {
   margin: 0 0 14px;
   padding: 10px 14px;
-  border: 1px solid;
-  border-radius: 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
   font-size: 13px;
   word-break: break-word;
 }
@@ -161,20 +97,17 @@ button.danger {
   margin-bottom: 0;
 }
 
+/* A successful save needs no colour — it is the expected outcome. */
 .banner--ok {
-  background: var(--ok-bg);
-  border-color: var(--ok-border);
-  color: var(--ok-text);
+  color: var(--text-muted);
 }
 
 .banner--warn {
-  background: var(--warn-bg);
   border-color: var(--warn-border);
   color: var(--warn-text);
 }
 
 .banner--error {
-  background: var(--error-bg);
   border-color: var(--error-border);
   color: var(--error-text);
 }
@@ -193,13 +126,6 @@ button.danger {
 .library__search {
   flex: 1 1 220px;
   min-width: 180px;
-  padding: 8px 11px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
 }
 
 .library__filters {
@@ -214,17 +140,11 @@ button.danger {
   font-size: 12.5px;
 }
 
-.chip[aria-pressed="true"] {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--accent-text);
-}
-
 .library__count,
 .library__empty,
 .library__error {
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 12.5px;
 }
 
 .library__error {
@@ -232,14 +152,14 @@ button.danger {
 }
 
 .library__empty {
-  padding: 40px 0;
+  padding: 48px 0;
   text-align: center;
 }
 
 .library__sentinel {
   height: 40px;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 12.5px;
   text-align: center;
 }
 
@@ -256,20 +176,26 @@ button.danger {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--surface);
   overflow: hidden;
+}
+
+/* Hovering anywhere over a capture marks the whole card, so the tile reads as
+   one object rather than a picture with controls stuck underneath it. */
+.tile:hover {
+  border-color: var(--accent);
 }
 
 .tile__image {
   /* Fixed aspect box so the grid does not reflow as thumbnails arrive. */
   aspect-ratio: 16 / 10;
-  background: var(--surface-sunken);
+  /* The well is darker than the panel, so the screenshot is what stands out. */
+  background: var(--sunken);
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  /* It is a button, so reset the button chrome rather than inherit it. */
   width: 100%;
   padding: 0;
   border: 0;
@@ -277,15 +203,44 @@ button.danger {
   cursor: pointer;
 }
 
-/* Hovering anywhere over a capture highlights the whole card, not just the
-   thumbnail, so the entire tile reads as one clickable object. */
-.tile:hover {
-  border-color: var(--accent);
-  background: var(--surface-sunken);
+.tile__image img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: block;
 }
 
-.tile:hover .tile__image {
-  background: transparent;
+.tile__meta {
+  padding: 10px 12px 6px;
+}
+
+.tile__name {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tile__when,
+.tile__size {
+  margin: 2px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.tile__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px 12px;
+  margin-top: auto;
+}
+
+.tile__actions button {
+  padding: 5px 9px;
+  font-size: 12px;
 }
 
 /* --- viewer --- */
@@ -298,18 +253,17 @@ button.danger {
   align-items: center;
   justify-content: center;
   padding: 28px;
-  background: rgba(8, 10, 14, 0.72);
+  background: var(--scrim);
 }
 
 .viewer__panel {
   display: flex;
-  gap: 0;
   max-width: 1100px;
   max-height: 100%;
   width: 100%;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
 }
 
@@ -320,7 +274,7 @@ button.danger {
   align-items: center;
   justify-content: center;
   padding: 16px;
-  background: var(--surface-sunken);
+  background: var(--sunken);
 }
 
 .viewer__stage img {
@@ -385,133 +339,18 @@ button.danger {
   }
 }
 
-.tile__image img {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-  display: block;
-}
-
-.tile__meta {
-  padding: 10px 12px 6px;
-}
-
-.tile__name {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tile__when,
-.tile__size {
-  margin: 2px 0 0;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.tile__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px 12px 12px;
-  margin-top: auto;
-}
-
-.tile__actions button {
-  padding: 5px 9px;
-  font-size: 12px;
-}
-
-/* ------------------------------------------------------------------
-   Explicit theme override.
-
-   The media query above handles "Match Windows". These blocks come after
-   it so a deliberate Light or Dark choice wins regardless of the OS
-   setting. Keep the variable lists in sync with the two blocks above.
-   ------------------------------------------------------------------ */
-
-:root[data-theme="light"] {
-  --bg: #f5f6f8;
-  --surface: #ffffff;
-  --surface-sunken: #eceef1;
-  --border: #d9dde3;
-  --text: #191d23;
-  --text-muted: #5a626e;
-  --accent: #2f5fd8;
-  --accent-text: #ffffff;
-  --ok-bg: #edf6ee;
-  --ok-border: #b6d8bb;
-  --ok-text: #1e5128;
-  --warn-bg: #fdf5e6;
-  --warn-border: #e3c88a;
-  --warn-text: #7a5510;
-  --error-bg: #fdf1f1;
-  --error-border: #e2b2b2;
-  --error-text: #8a1f1f;
-}
-
-:root[data-theme="dark"] {
-  --bg: #131519;
-  --surface: #1b1e24;
-  --surface-sunken: #23272e;
-  --border: #2e333c;
-  --text: #e7e9ec;
-  --text-muted: #9aa2ae;
-  --accent: #6f9bff;
-  --accent-text: #0d1016;
-  --ok-bg: #16251a;
-  --ok-border: #2f5136;
-  --ok-text: #a8d9b0;
-  --warn-bg: #2a2214;
-  --warn-border: #5b4a26;
-  --warn-text: #e5c682;
-  --error-bg: #2a1919;
-  --error-border: #5a2e2e;
-  --error-text: #f0b4b4;
-}
-
-/* --- tabs --- */
-
-.tabs {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 16px;
-  border-bottom: 1px solid var(--border);
-}
-
-.tabs button {
-  border: 0;
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
-  background: transparent;
-  color: var(--text-muted);
-  padding: 8px 14px;
-}
-
-.tabs button:hover {
-  color: var(--text);
-}
-
-.tabs button[aria-pressed="true"] {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-}
-
 /* --- settings --- */
 
 .settings {
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 20px;
   max-width: 720px;
 }
 
 .settings__group {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--surface);
   padding: 16px 18px;
 }
@@ -551,13 +390,6 @@ button.danger {
 .settings__control input[type="number"],
 .settings__control select {
   width: 100%;
-  padding: 6px 9px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
 }
 
 .settings__inline {
@@ -568,6 +400,11 @@ button.danger {
 
 .settings__inline input[type="range"] {
   flex: 1;
+  accent-color: var(--accent);
+}
+
+.settings__inline button {
+  flex: none;
 }
 
 .settings__value {
@@ -579,9 +416,9 @@ button.danger {
 .settings__preview {
   display: inline-block;
   padding: 5px 9px;
-  border-radius: 5px;
-  background: var(--surface-sunken);
-  font-family: "Cascadia Mono", Consolas, monospace;
+  border-radius: var(--radius);
+  background: var(--sunken);
+  font-family: var(--font-mono);
   font-size: 12px;
   word-break: break-all;
 }
@@ -597,6 +434,7 @@ button.danger {
 .settings__toggle input {
   margin: 2px 0 0;
   flex: none;
+  accent-color: var(--accent);
 }
 
 .settings__note {
@@ -609,8 +447,8 @@ button.danger {
 .settings__row code {
   padding: 1px 5px;
   border-radius: 4px;
-  background: var(--surface-sunken);
-  font-family: "Cascadia Mono", Consolas, monospace;
+  background: var(--sunken);
+  font-family: var(--font-mono);
   font-size: 11.5px;
 }
 
@@ -636,6 +474,8 @@ button.danger {
 }
 
 .settings a {
-  color: var(--accent);
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
   word-break: break-all;
 }

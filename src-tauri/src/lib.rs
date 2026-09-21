@@ -42,8 +42,6 @@ pub struct AppState {
     pub session: Mutex<Option<CaptureSession>>,
     /// Shortcuts that could not be bound at startup, for Settings to surface.
     pub shortcut_warnings: Mutex<Vec<String>>,
-    /// The capture currently open in the editor window.
-    pub editing: Mutex<Option<std::path::PathBuf>>,
     /// Which capture each pinned window is showing, keyed by window label.
     pub pins: pin::PinRegistry,
 }
@@ -81,13 +79,76 @@ pub fn capture_immediate(app: &AppHandle, mode: ImmediateMode) {
 
         match capture::capture_and_save(request, &mut settings) {
             Ok(record) => {
-                let _ = app.emit("capture-complete", &record);
+                announce_capture(&app, &record);
             }
             Err(err) => {
                 let _ = app.emit("capture-failed", err);
             }
         }
     });
+}
+
+/// Announce a finished capture: tell the UI, and toast if the user wants one.
+///
+/// Every successful capture goes through here so the notification setting means
+/// the same thing no matter which route produced the capture — overlay, tray, or
+/// a direct-mode shortcut.
+pub fn announce_capture(app: &AppHandle, record: &CaptureRecord) {
+    let _ = app.emit("capture-complete", record);
+
+    let wanted = app
+        .state::<AppState>()
+        .settings
+        .lock()
+        .map(|s| s.notifications.show_saved_toast)
+        .unwrap_or(false);
+
+    if !wanted {
+        return;
+    }
+
+    use tauri_plugin_notification::NotificationExt;
+    // A failed toast is never worth surfacing: the capture is already saved,
+    // and notifications can be disabled at the OS level entirely.
+    let _ = app
+        .notification()
+        .builder()
+        .title("Screenshot saved")
+        .body(format!(
+            "{}  ·  {} x {}",
+            record.file_name, record.width, record.height
+        ))
+        .show();
+}
+
+/// Apply the retention setting, if it is switched on.
+///
+/// Runs at startup and after settings are saved, rather than on a timer: a tool
+/// that only deletes while it happens to be running is easier to reason about
+/// than one with a background scheduler, and the difference to the user is
+/// nothing.
+pub fn apply_retention(app: &AppHandle) {
+    let (enabled, days, directory) = {
+        let state = app.state::<AppState>();
+        let Ok(settings) = state.settings.lock() else {
+            return;
+        };
+        (
+            settings.retention.enabled,
+            settings.retention.days,
+            settings.save_directory.clone(),
+        )
+    };
+
+    if !enabled {
+        return;
+    }
+
+    match history::prune(&directory, days) {
+        Ok(0) => {}
+        Ok(count) => eprintln!("[retention] removed {count} capture(s) older than {days} days"),
+        Err(err) => eprintln!("[retention] {err}"),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -157,6 +218,22 @@ fn reveal_in_explorer(path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Open the save folder in File Explorer.
+#[tauri::command]
+fn open_save_folder(state: State<'_, AppState>) -> Result<(), String> {
+    let directory = save_directory(&state)?;
+    // Create it first: the folder may not exist yet if nothing has been
+    // captured, and opening a missing path just fails silently in Explorer.
+    std::fs::create_dir_all(&directory)
+        .map_err(|e| format!("could not create {}: {e}", directory.display()))?;
+
+    std::process::Command::new("explorer")
+        .arg(directory.as_os_str())
+        .spawn()
+        .map_err(|e| format!("could not open Explorer: {e}"))?;
+    Ok(())
+}
+
 /// Hide the main window to the tray.
 #[tauri::command]
 fn hide_to_tray(app: AppHandle) {
@@ -191,100 +268,11 @@ fn copy_capture(path: String) -> Result<(), String> {
     clipboard::copy_image(&image).map(|_| ())
 }
 
-/// What the editor window needs to load a capture.
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct EditorState {
-    file_name: String,
-    /// Served by the image protocol rather than a file:// path, so the editor
-    /// needs no filesystem access of its own.
-    image_url: String,
-}
-
-/// Open a capture in the annotation editor.
+/// Save an annotated copy of a capture.
 ///
-/// One editor window is reused rather than spawning one per capture: a grid of
-/// hundreds of thumbnails is very easy to click twice, and a pile of stacked
-/// editor windows is not what anyone wants from that.
-#[tauri::command]
-fn open_editor(app: AppHandle, path: String) -> Result<(), String> {
-    show_editor(&app, std::path::PathBuf::from(&path))
-}
-
-/// Open a capture in the editor.
-///
-/// Shared by the library's click handler and by the post-capture flow, since the
-/// brief calls for the editing screen to appear straight after a capture.
-pub fn show_editor(app: &AppHandle, target: std::path::PathBuf) -> Result<(), String> {
-    if !target.exists() {
-        return Err(format!("{} no longer exists", target.display()));
-    }
-
-    {
-        let state = app.state::<AppState>();
-        let mut editing = state
-            .editing
-            .lock()
-            .map_err(|_| "editor lock poisoned".to_string())?;
-        *editing = Some(target);
-    }
-
-    if let Some(window) = app.get_webview_window("editor") {
-        // Already open: point it at the new capture and bring it forward.
-        let _ = window.emit("editor-load", ());
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
-        return Ok(());
-    }
-
-    tauri::WebviewWindowBuilder::new(
-        app,
-        "editor",
-        tauri::WebviewUrl::App("editor.html".into()),
-    )
-    .title("Snipd editor")
-    .inner_size(1100.0, 780.0)
-    .min_inner_size(640.0, 480.0)
-    .center()
-    .build()
-    .map_err(|e| format!("could not open the editor: {e}"))?;
-
-    Ok(())
-}
-
-/// Tell the editor which capture to show.
-#[tauri::command]
-fn editor_state(state: State<'_, AppState>) -> Result<EditorState, String> {
-    let path = state
-        .editing
-        .lock()
-        .map_err(|_| "editor lock poisoned".to_string())?
-        .clone()
-        .ok_or_else(|| "nothing is open in the editor".to_string())?;
-
-    let directory = save_directory(&state)?;
-    let key = history::key_for(&path).ok_or_else(|| "capture is unreadable".to_string())?;
-    // Warm the cache so the protocol handler can answer without a folder scan.
-    let _ = history::resolve_thumbnail_key(&key, &directory);
-
-    Ok(EditorState {
-        file_name: path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default(),
-        image_url: format!(
-            "http://{}.localhost/full?k={key}",
-            overlay::FRAME_SCHEME
-        ),
-    })
-}
-
-/// Save an annotated copy of the capture currently being edited.
-///
-/// Deliberately a *copy*. The original capture was auto-saved the instant it was
-/// taken and is the one thing this app promises never to lose, so an edit must
-/// not be able to destroy it.
+/// Deliberately a *copy*. The original was auto-saved the instant it was taken
+/// and is the one thing this app promises never to lose, so an edit must not be
+/// able to destroy it.
 #[tauri::command]
 fn save_edited(png: String, state: State<'_, AppState>) -> Result<CaptureRecord, String> {
     use base64::Engine;
@@ -313,6 +301,25 @@ fn save_edited(png: String, state: State<'_, AppState>) -> Result<CaptureRecord,
         Some("Edited".to_string()),
         &mut settings,
     )
+}
+
+/// Copy an annotated image to the clipboard without saving it.
+///
+/// Separate from [`save_edited`] because wanting a marked-up screenshot on the
+/// clipboard is not the same as wanting another file in the library.
+#[tauri::command]
+fn copy_edited(png: String) -> Result<(), String> {
+    use base64::Engine;
+
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(png.as_bytes())
+        .map_err(|e| format!("the edited image was not valid base64: {e}"))?;
+
+    let image = image::load_from_memory(&bytes)
+        .map_err(|e| format!("the edited image could not be decoded: {e}"))?
+        .to_rgba8();
+
+    clipboard::copy_image(&image).map(|_| ())
 }
 
 /// Replace the settings and act on anything that has side effects.
@@ -355,6 +362,8 @@ fn update_settings(
     if let Err(err) = set_launch_on_login(launch_on_login) {
         eprintln!("[startup] {err}");
     }
+
+    apply_retention(&app);
 
     Ok(warnings)
 }
@@ -521,12 +530,12 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(AppState {
             settings: Mutex::new(settings),
             session: Mutex::new(None),
             shortcut_warnings: Mutex::new(Vec::new()),
-            editing: Mutex::new(None),
             pins: Mutex::new(std::collections::HashMap::new()),
         })
         // Serves the overlay's frozen backdrop straight from memory. Going via
@@ -580,6 +589,8 @@ pub fn run() {
                 *slot = warnings;
             }
 
+            apply_retention(handle);
+
             // The window is built hidden so that starting at login never flashes
             // it on screen. A manual launch shows it immediately.
             if !start_hidden {
@@ -600,12 +611,12 @@ pub fn run() {
             capture,
             reveal_in_explorer,
             hide_to_tray,
+            open_save_folder,
             history_list,
             history_delete,
             copy_capture,
-            open_editor,
-            editor_state,
             save_edited,
+            copy_edited,
             update_settings,
             pin::pin_capture,
             pin::pin_state,

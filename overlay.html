@@ -5,17 +5,24 @@
     <title>Snipd capture</title>
     <style>
       /*
-       * The overlay shows a still of the desktop, frozen the instant before it
-       * opened. Everything the user drags over is that image, so nothing can
-       * move, close or steal focus mid-selection.
+       * The capture overlay.
+       *
+       * It shows a still of the desktop frozen the instant before it appeared,
+       * so nothing can move, close or steal focus mid-selection.
+       *
+       * The overlay is always dark regardless of the app theme: it sits on a
+       * dimmed screen, so its chrome has one job — stay legible over whatever
+       * happens to be underneath. Colours are literal rather than tokens for
+       * that reason.
        *
        * Layering, bottom to top:
-       *   #backdrop  the frozen desktop
-       *   #dim       darkens all of it
-       *   #bright    a second copy of the same image, clipped to the current
-       *              selection, which is what makes the selection look lit
-       *   #outline   the selection border and handles
-       *   toolbar    mode switcher
+       *   #backdrop   the frozen desktop
+       *   #dim        the scrim
+       *   #bright     a second copy of the same image, clipped to the selection
+       *   #lasso      the freehand path
+       *   #outline    the selection border
+       *   reticle     crosshair guides
+       *   toolbar     mode switcher
        */
       html,
       body {
@@ -25,9 +32,11 @@
         height: 100%;
         overflow: hidden;
         background: #000;
-        cursor: crosshair;
+        /* A custom reticle replaces the OS cursor, so hide that. */
+        cursor: none;
         user-select: none;
         -webkit-user-select: none;
+        font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
       }
 
       #backdrop,
@@ -36,8 +45,8 @@
         inset: 0;
         width: 100%;
         height: 100%;
-        /* The backdrop is a 1:1 still of the desktop; any scaling here would
-           make the preview disagree with the pixels actually saved. */
+        /* A 1:1 still of the desktop; any scaling here would make the preview
+           disagree with the pixels actually saved. */
         object-fit: fill;
         pointer-events: none;
         -webkit-user-drag: none;
@@ -46,7 +55,7 @@
       #dim {
         position: fixed;
         inset: 0;
-        background: rgba(10, 12, 16, 0.5);
+        background: rgba(0, 0, 0, 0.45);
         pointer-events: none;
       }
 
@@ -54,12 +63,22 @@
         display: none;
       }
 
+      /*
+       * The selection border is pure white with a dark stroke immediately
+       * outside it. A single white line disappears against white content and a
+       * single dark line disappears against dark content; the pair is legible
+       * over both, which matters because a screenshot tool has no idea what is
+       * underneath it.
+       */
       #outline {
         position: fixed;
         display: none;
         pointer-events: none;
-        outline: 1.5px solid #fff;
+        outline: 1px solid #ffffff;
         outline-offset: -1px;
+        box-shadow:
+          0 0 0 1px rgba(0, 0, 0, 0.55),
+          inset 0 0 0 2px rgba(0, 0, 0, 0.35);
       }
 
       #lasso {
@@ -69,14 +88,39 @@
         pointer-events: none;
       }
 
+      /* --- reticle --- */
+
+      .reticle {
+        position: fixed;
+        display: none;
+        background: rgba(255, 255, 255, 0.5);
+        pointer-events: none;
+      }
+
+      #reticle-h {
+        left: 0;
+        width: 100%;
+        height: 1px;
+      }
+
+      #reticle-v {
+        top: 0;
+        width: 1px;
+        height: 100%;
+      }
+
+      /* --- readout --- */
+
       #readout {
         position: fixed;
         display: none;
         padding: 4px 8px;
-        font: 12px/1.35 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+        font-size: 12px;
+        line-height: 1.35;
         font-variant-numeric: tabular-nums;
-        color: #fff;
-        background: rgba(16, 19, 24, 0.92);
+        color: #ffffff;
+        background: #1a1a1e;
+        border: 1px solid #2d2d34;
         border-radius: 5px;
         white-space: nowrap;
         pointer-events: none;
@@ -93,9 +137,9 @@
         align-items: center;
         gap: 2px;
         padding: 5px;
-        background: rgba(28, 32, 39, 0.97);
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        border-radius: 11px;
+        background: #1a1a1e;
+        border: 1px solid #2d2d34;
+        border-radius: 10px;
         cursor: default;
       }
 
@@ -105,21 +149,23 @@
         gap: 7px;
         padding: 8px 11px;
         border: 0;
-        border-radius: 7px;
+        border-radius: 6px;
         background: transparent;
-        color: rgba(255, 255, 255, 0.74);
-        font: 13px/1 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+        /* Inactive icons are the muted grey from the palette. */
+        color: #8e8e93;
+        font: inherit;
+        font-size: 13px;
         cursor: pointer;
       }
 
       .tool:hover {
-        background: rgba(255, 255, 255, 0.09);
-        color: #fff;
+        color: #ffffff;
       }
 
+      /* Active state is pure white, the only "accent" this app has. */
       .tool[aria-pressed="true"] {
-        background: rgba(255, 255, 255, 0.16);
-        color: #fff;
+        background: #ffffff;
+        color: #121214;
       }
 
       .tool svg {
@@ -142,11 +188,7 @@
         width: 1px;
         height: 22px;
         margin: 0 4px;
-        background: rgba(255, 255, 255, 0.16);
-      }
-
-      #delay-value {
-        font-variant-numeric: tabular-nums;
+        background: #2d2d34;
       }
 
       #hint {
@@ -155,9 +197,10 @@
         left: 50%;
         transform: translateX(-50%);
         padding: 7px 14px;
-        font: 12.5px/1.4 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
-        color: rgba(255, 255, 255, 0.92);
-        background: rgba(16, 19, 24, 0.85);
+        font-size: 12.5px;
+        color: #8e8e93;
+        background: #1a1a1e;
+        border: 1px solid #2d2d34;
         border-radius: 6px;
         pointer-events: none;
       }
@@ -170,24 +213,26 @@
     <img id="bright" alt="" />
     <svg id="lasso" xmlns="http://www.w3.org/2000/svg"></svg>
     <div id="outline"></div>
+    <div class="reticle" id="reticle-h"></div>
+    <div class="reticle" id="reticle-v"></div>
     <div id="readout"></div>
 
     <div id="toolbar" role="toolbar" aria-label="Capture mode">
-      <button class="tool" type="button" data-mode="rectangle" aria-pressed="true" title="Rectangle">
+      <button class="tool" type="button" data-mode="rectangle" aria-pressed="true" title="Rectangle (1)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
           <rect x="3.5" y="5.5" width="17" height="13" rx="1.5" />
         </svg>
         <span class="tool__label">Rectangle</span>
       </button>
 
-      <button class="tool" type="button" data-mode="freeform" aria-pressed="false" title="Freeform">
+      <button class="tool" type="button" data-mode="freeform" aria-pressed="false" title="Freeform (2)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
           <path d="M4 14c0-5 4-9 8-9s8 3 8 7-4 7-8 7c-3 0-5-1-5-3s2-3 4-3" />
         </svg>
         <span class="tool__label">Freeform</span>
       </button>
 
-      <button class="tool" type="button" data-mode="window" aria-pressed="false" title="Window">
+      <button class="tool" type="button" data-mode="window" aria-pressed="false" title="Window (3)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
           <rect x="3.5" y="4.5" width="17" height="15" rx="1.5" />
           <path d="M3.5 9h17" />
@@ -195,7 +240,7 @@
         <span class="tool__label">Window</span>
       </button>
 
-      <button class="tool" type="button" data-mode="fullscreen" aria-pressed="false" title="Full screen">
+      <button class="tool" type="button" data-mode="fullscreen" aria-pressed="false" title="Full screen (4)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
           <rect x="2.5" y="4.5" width="19" height="12" rx="1.5" />
           <path d="M8 20h8" />

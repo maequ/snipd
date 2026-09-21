@@ -25,7 +25,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -383,6 +383,61 @@ fn remember_key(key: &str, path: &Path) {
     }
 }
 
+/// Delete captures older than `days`, returning how many went.
+///
+/// This is the one place in the app that removes files the user did not pick,
+/// so it is deliberately conservative: it only ever touches image files sitting
+/// directly in the save folder, never recurses, and is only called at all when
+/// the retention setting has been explicitly turned on.
+///
+/// Age is taken from the file's modification time rather than the history index,
+/// because the index is enrichment and may be missing — and a capture with no
+/// index entry must not be treated as infinitely old.
+pub fn prune(save_directory: &Path, days: u32) -> Result<usize, String> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_millis() as u64;
+
+    let window = u64::from(days).saturating_mul(24 * 60 * 60 * 1000);
+    // A zero-day window would delete everything the moment it was saved, which
+    // is never what anyone means. `Settings::normalise` already clamps this, but
+    // this is the code that does the deleting, so it checks for itself.
+    if window == 0 {
+        return Ok(0);
+    }
+    let cutoff = now.saturating_sub(window);
+
+    let dir = match fs::read_dir(save_directory) {
+        Ok(dir) => dir,
+        Err(_) => return Ok(0),
+    };
+
+    let mut removed = 0;
+    for item in dir.flatten() {
+        let path = item.path();
+        if !is_image(&path) {
+            continue;
+        }
+        let metadata = match item.metadata() {
+            Ok(metadata) if metadata.is_file() => metadata,
+            _ => continue,
+        };
+        if modified_ms(&metadata) >= cutoff {
+            continue;
+        }
+
+        // Reuse `delete` so the containment check and thumbnail cleanup apply
+        // here too, rather than having a second, laxer deletion path.
+        match delete(&path, save_directory) {
+            Ok(()) => removed += 1,
+            Err(err) => eprintln!("[retention] could not remove {}: {err}", path.display()),
+        }
+    }
+
+    Ok(removed)
+}
+
 /// Delete a capture and its cached thumbnail.
 ///
 /// Refuses anything outside the save folder, so a bad path from the UI cannot
@@ -474,6 +529,51 @@ mod tests {
         assert_eq!(page.total, 1);
         assert_eq!(page.entries[0].file_name, "stray.png");
         assert!(page.entries[0].kind.is_none());
+    }
+
+    /// Backdate a file so retention sees it as old.
+    fn age(path: &Path, days: u64) {
+        let when = SystemTime::now() - std::time::Duration::from_secs(days * 24 * 60 * 60);
+        let file = fs::File::options().write(true).open(path).unwrap();
+        file.set_modified(when).unwrap();
+    }
+
+    #[test]
+    fn prune_removes_only_captures_past_the_window() {
+        let root = tempfile::tempdir().unwrap();
+        let old = root.path().join("old.png");
+        let fresh = root.path().join("fresh.png");
+        fs::write(&old, b"x").unwrap();
+        fs::write(&fresh, b"x").unwrap();
+        age(&old, 40);
+
+        assert_eq!(prune(root.path(), 30).unwrap(), 1);
+        assert!(!old.exists(), "a capture past the window should be gone");
+        assert!(fresh.exists(), "a recent capture must be kept");
+    }
+
+    #[test]
+    fn prune_leaves_non_image_files_alone() {
+        let root = tempfile::tempdir().unwrap();
+        let notes = root.path().join("notes.txt");
+        fs::write(&notes, b"x").unwrap();
+        age(&notes, 400);
+
+        assert_eq!(prune(root.path(), 1).unwrap(), 0);
+        assert!(notes.exists(), "retention must only ever touch captures");
+    }
+
+    #[test]
+    fn prune_with_a_zero_day_window_deletes_nothing() {
+        // A zero window would otherwise mean "delete everything immediately",
+        // which is never what anyone intends by it.
+        let root = tempfile::tempdir().unwrap();
+        let shot = root.path().join("shot.png");
+        fs::write(&shot, b"x").unwrap();
+        age(&shot, 5);
+
+        assert_eq!(prune(root.path(), 0).unwrap(), 0);
+        assert!(shot.exists());
     }
 
     #[test]

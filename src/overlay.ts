@@ -89,6 +89,8 @@ const outline = document.getElementById("outline") as HTMLDivElement;
 const readout = document.getElementById("readout") as HTMLDivElement;
 const toolbar = document.getElementById("toolbar") as HTMLDivElement;
 const hint = document.getElementById("hint") as HTMLDivElement;
+const reticleH = document.getElementById("reticle-h") as HTMLDivElement;
+const reticleV = document.getElementById("reticle-v") as HTMLDivElement;
 const delayButton = document.getElementById("delay") as HTMLButtonElement;
 const delayValue = document.getElementById("delay-value") as HTMLSpanElement;
 const closeButton = document.getElementById("close") as HTMLButtonElement;
@@ -165,6 +167,28 @@ function waitForGeometry(): Promise<void> {
 
     requestAnimationFrame(check);
   });
+}
+
+/**
+ * Move the crosshair guides, snapped to the underlying screen pixel grid.
+ *
+ * Snapping matters because the overlay is displayed at CSS scale: on a scaled
+ * display one CSS pixel covers more than one real pixel, so an unsnapped guide
+ * sits between rows and reads as a soft grey smear rather than a precise line.
+ * Rounding in physical space and converting back puts it exactly on a boundary.
+ */
+function moveReticle(cssX: number, cssY: number): void {
+  const snappedX = Math.round(cssX * scaleX) / scaleX;
+  const snappedY = Math.round(cssY * scaleY) / scaleY;
+  reticleH.style.top = `${snappedY}px`;
+  reticleV.style.left = `${snappedX}px`;
+  reticleH.style.display = "block";
+  reticleV.style.display = "block";
+}
+
+function hideReticle(): void {
+  reticleH.style.display = "none";
+  reticleV.style.display = "none";
 }
 
 /** CSS point in this window to a virtual-screen coordinate. */
@@ -290,7 +314,7 @@ function setMode(next: Mode): void {
 
   hint.textContent = HINTS[next];
   hint.style.display = "block";
-  document.body.style.cursor = next === "window" || next === "fullscreen" ? "pointer" : "crosshair";
+  // The OS cursor is hidden in favour of the reticle, so nothing to set here.
 }
 
 /** In window and full-screen mode, highlight whatever is under the cursor. */
@@ -416,6 +440,9 @@ function onMouseDown(event: PointerEvent): void {
 function onMouseMove(event: PointerEvent): void {
   if (settled || !ready) return;
 
+  if (toolbar.contains(event.target as Node)) hideReticle();
+  else moveReticle(event.clientX, event.clientY);
+
   if (!dragging) {
     if (mode === "window" || mode === "fullscreen") {
       updateHover(event.clientX, event.clientY);
@@ -476,6 +503,7 @@ function onMouseUp(event: PointerEvent): void {
     return;
   }
 
+  hideReticle();
   void commitRect({ x: start.x, y: start.y, width, height }, "region", null);
 }
 

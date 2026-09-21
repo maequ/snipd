@@ -1,40 +1,13 @@
-/* Working styles. The deliberate visual pass is a later phase. */
+/*
+ * Annotation editor.
+ *
+ * The capture being edited is the only thing that should draw the eye, so the
+ * toolbar is a quiet panel and the canvas sits in a recessed well. Colours come
+ * from tokens.css; the swatch row is the one place actual colour appears, and
+ * that is the user's ink, not the app's chrome.
+ */
 
-:root {
-  color-scheme: light dark;
-  --bg: #f5f6f8;
-  --surface: #ffffff;
-  --sunken: #dfe2e7;
-  --border: #d9dde3;
-  --text: #191d23;
-  --muted: #5a626e;
-  --accent: #2f5fd8;
-  --accent-text: #ffffff;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #131519;
-    --surface: #1b1e24;
-    --sunken: #0e1013;
-    --border: #2e333c;
-    --text: #e7e9ec;
-    --muted: #9aa2ae;
-    --accent: #6f9bff;
-    --accent-text: #0d1016;
-  }
-}
-
-* {
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--text);
-  font: 13px/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
-}
+@import "./tokens.css";
 
 .editor {
   display: flex;
@@ -62,37 +35,19 @@ body {
   margin-left: auto;
 }
 
-button {
+.bar button {
   padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.bar button:hover:not(:disabled) {
   color: var(--text);
-  font: inherit;
-  cursor: pointer;
 }
 
-button:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-button[aria-pressed="true"] {
-  border-color: var(--accent);
-  background: var(--accent);
+.bar button[aria-pressed="true"],
+.bar button.primary {
   color: var(--accent-text);
-}
-
-button:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-button.primary {
-  border-color: transparent;
-  background: var(--accent);
-  color: var(--accent-text);
-  font-weight: 500;
 }
 
 .swatch {
@@ -103,10 +58,15 @@ button.primary {
   border: 1px solid var(--border);
 }
 
+/* The swatch shows its own colour, so selection has to be a ring around it
+   rather than a fill. */
 .swatch[aria-pressed="true"] {
-  /* The swatch shows its own colour, so selection is a ring, not a fill. */
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+.swatch:hover {
+  border-color: var(--text-muted);
 }
 
 .status {
@@ -114,7 +74,8 @@ button.primary {
   padding: 7px 12px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  color: var(--muted);
+  color: var(--text-muted);
+  font-size: 12.5px;
 }
 
 .stage {
@@ -140,9 +101,10 @@ canvas {
   /* Scales to fit while the backing store stays at full image resolution, so
      what is exported is never limited by how it is being displayed. */
   max-width: 100%;
-  max-height: calc(100vh - 140px);
+  max-height: calc(100vh - 150px);
   object-fit: contain;
-  background: #fff;
+  /* A hairline so a capture with white edges does not bleed into the well. */
+  box-shadow: 0 0 0 1px var(--border);
 }
 
 .text-input {
@@ -161,6 +123,6 @@ canvas {
   padding: 6px 12px;
   background: var(--surface);
   border-top: 1px solid var(--border);
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 12px;
 }

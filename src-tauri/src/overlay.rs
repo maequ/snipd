@@ -315,7 +315,7 @@ where
 
     match &outcome {
         Ok(record) => {
-            let _ = app.emit("capture-complete", record);
+            crate::announce_capture(app, record);
             // The editor now lives inside the main window rather than in one of
             // its own, so bringing that window up is all this needs to do. It
             // was hidden to keep it out of the shot, so it has to be brought

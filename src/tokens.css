@@ -1,0 +1,171 @@
+/*
+ * Snipd design tokens.
+ *
+ * A dark/dim monochromatic system. The app sits on top of whatever the user is
+ * capturing, so its chrome must never compete with the screenshot: there is no
+ * coloured accent at all. Active state is pure white on dark, pure black on
+ * light, which reads unambiguously against any screen content underneath.
+ *
+ * The one exception is error and warning text, which carries a muted hue —
+ * losing the only signal that something went wrong would be worse than the
+ * small break in discipline, and neither is ever used as an accent.
+ *
+ * Shared by every window, so the overlay, editor, pins and main window cannot
+ * drift apart.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* Light is the default; the dark block below overrides it. */
+  --bg: #f8f9fa; /* main canvas */
+  --surface: #ffffff; /* panels, toolbars, cards */
+  --sunken: #edeef0; /* wells that images sit in */
+  --border: #dee2e6;
+  --text: #1a1a1e;
+  --text-muted: #6c757d; /* secondary text, inactive icons */
+  --accent: #000000; /* active state */
+  --accent-text: #ffffff; /* text on the accent */
+
+  --error-text: #b4302c;
+  --error-border: #e8c4c2;
+  --warn-text: #8a6314;
+  --warn-border: #eddcb4;
+
+  --radius: 6px;
+  --radius-lg: 8px;
+
+  /* One shared dim value, so the overlay and the viewer feel like one app. */
+  --scrim: rgba(0, 0, 0, 0.45);
+
+  --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121214;
+    --surface: #1a1a1e;
+    --sunken: #0b0b0d;
+    --border: #2d2d34;
+    --text: #f2f2f4;
+    --text-muted: #8e8e93;
+    --accent: #ffffff;
+    --accent-text: #121214;
+
+    --error-text: #e8918f;
+    --error-border: #4a2b2b;
+    --warn-text: #d8b57a;
+    --warn-border: #4a3e28;
+  }
+}
+
+/* A deliberate Light or Dark choice wins over the OS setting. */
+:root[data-theme="light"] {
+  --bg: #f8f9fa;
+  --surface: #ffffff;
+  --sunken: #edeef0;
+  --border: #dee2e6;
+  --text: #1a1a1e;
+  --text-muted: #6c757d;
+  --accent: #000000;
+  --accent-text: #ffffff;
+  --error-text: #b4302c;
+  --error-border: #e8c4c2;
+  --warn-text: #8a6314;
+  --warn-border: #eddcb4;
+}
+
+:root[data-theme="dark"] {
+  --bg: #121214;
+  --surface: #1a1a1e;
+  --sunken: #0b0b0d;
+  --border: #2d2d34;
+  --text: #f2f2f4;
+  --text-muted: #8e8e93;
+  --accent: #ffffff;
+  --accent-text: #121214;
+  --error-text: #e8918f;
+  --error-border: #4a2b2b;
+  --warn-text: #d8b57a;
+  --warn-border: #eddcb4;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 var(--font);
+}
+
+/* ---------------------------------------------------------------------------
+   Controls
+   --------------------------------------------------------------------------- */
+
+button {
+  padding: 7px 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--text-muted);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Active state is the accent itself — pure white on dark, pure black on light. */
+button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 500;
+}
+
+button.primary:hover:not(:disabled) {
+  /* No colour to shift to, so emphasis comes from the ring instead. */
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--accent);
+}
+
+button.danger {
+  border-color: var(--error-border);
+  color: var(--error-text);
+}
+
+input[type="text"],
+input[type="number"],
+input[type="search"],
+select {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+input:focus-visible,
+select:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}

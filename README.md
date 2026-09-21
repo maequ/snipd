@@ -7,53 +7,66 @@ reskin of it. Every capture is written to disk the instant it is taken — there
 no save step to forget, no window to close too early, and no capture that exists
 only in the clipboard.
 
-> **Status:** early development. The capture engine works; history, annotation,
-> pinning, tray behaviour, settings and the installer are in progress. See
-> [Roadmap](#roadmap).
-
 ---
 
 ## Why it exists
 
-Each of these is a specific, concrete complaint about the built-in tool, and each
-one is fixed in behaviour rather than in presentation:
+Each row below is a specific complaint about the built-in tool, fixed in
+behaviour rather than in presentation.
 
 | Problem with Snipping Tool | What Snipd does |
 | --- | --- |
-| Captures are lost if you forget to save | Every capture is written to disk before anything else happens |
-| Meaningless generic filenames | Names follow the pattern you chose, with a live preview |
-| Saves wherever it feels like | Always saves to the folder you configured |
-| No history if you did not save elsewhere | A full, browsable history of every capture ever taken |
-| Thin annotation tools | Pen, arrows, shapes, text, and a blur tool for redacting sensitive details |
-| Cannot keep a shot visible while you work | Pin any capture as a resizable, always-on-top window |
-| Clipboard copy is inconsistent | Copying retries while the clipboard is locked, instead of silently failing |
-| Poor multi-monitor behaviour | One coordinate space across all displays, including mixed DPI and cross-screen selections |
+| Captures are lost if you forget to save | Every capture is on disk before anything else can fail |
+| Meaningless generic filenames | Your naming pattern, with a live preview of the result |
+| Saves wherever it feels like | Always the folder you chose |
+| No history unless you saved elsewhere | A full, searchable library of every capture ever taken |
+| Thin annotation tools | Pen, arrows, shapes, text, crop, and redaction for hiding sensitive details |
+| Cannot keep a shot visible while you work | Pin any capture as a floating always-on-top window |
+| Clipboard copy is inconsistent | Copying retries while the clipboard is locked instead of silently failing |
+| Poor multi-monitor behaviour | One coordinate space across all displays, including mixed DPI |
 
 ## Features
 
-- **One way in** — press the shortcut anywhere, or use the tray. The screen
-  freezes and a toolbar appears; the mode is chosen there, not beforehand.
-- **Four modes** — rectangle, freeform lasso, window, and full screen, plus a
-  capture delay for grabbing menus and hover states.
-- **Automatic saving** — with the naming pattern, folder and file format you
-  configured. Nothing is ever overwritten.
-- **Browsable history** — every capture, searchable and filterable, rebuilt by
-  scanning the folder so a lost index can never lose a capture.
-- **Multi-monitor aware** — selections can span two displays with different DPI
-  scaling and still come out pixel-correct.
-- **Local only** — no account, no login, no cloud, no telemetry. Your captures
-  never leave your machine.
+**Capture** — press the shortcut anywhere and the screen freezes with a toolbar:
+rectangle, freeform lasso, window, or full screen, plus a delay timer for
+catching menus and hover states. Every capture saves automatically.
+
+**Library** — every capture, searchable by filename and filterable by date, with
+lazily loaded thumbnails so a folder of thousands stays fast.
+
+**Editor** — pen, arrow, rectangle, ellipse, text, crop, and a redaction tool
+that pixelates rather than blurs. Undo and redo throughout. Saving always writes
+a *copy*, so the original is never destroyed.
+
+**Pins** — float any capture on top of everything else while you work. Several at
+once, each its own window, dragged by the image itself.
+
+**Local only** — no account, no login, no cloud, no telemetry. Captures never
+leave your machine.
+
+## Installing
+
+Download `Snipd-Setup-x.y.z.exe` from
+[Releases](https://github.com/snipd-app/snipd/releases) and run it. The installer
+asks where to save captures, how to name them, which format to use, and whether
+to copy to the clipboard and start with Windows — and the app honours all of it
+on first launch.
+
+The installer is not code-signed, so Windows SmartScreen will warn on first run.
+Choose **More info → Run anyway**.
+
+Everything the installer asks is editable afterwards in Settings.
 
 ## Building from source
 
 ### Prerequisites
 
 - [Node.js](https://nodejs.org/) 20 or newer
-- [Rust](https://rustup.rs/) (stable toolchain)
+- [Rust](https://rustup.rs/) (stable)
 - **Visual Studio Build Tools** with the *Desktop development with C++* workload
-- **WebView2 Runtime** — already present on Windows 11 and up-to-date Windows 10
+- **WebView2 Runtime** — already present on Windows 11 and current Windows 10
 
-On a machine with `winget`, the two heavier prerequisites are:
+With `winget`:
 
 ```powershell
 winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
@@ -67,80 +80,102 @@ npm install
 npm run tauri dev
 ```
 
-### Build a release binary
+### Build a standalone executable
 
 ```bash
-npm run tauri build
+npm run tauri build -- --no-bundle
 ```
 
-### Run the tests
+Produces `src-tauri/target/release/snipd.exe`.
+
+### Build the installer
+
+Needs [Inno Setup 6](https://jrsoftware.org/isinfo.php)
+(`winget install --id JRSoftware.InnoSetup -e`), and the executable above:
+
+```bash
+"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer\snipd.iss
+```
+
+Output lands in `installer/Output/`.
+
+### Tests
 
 ```bash
 cd src-tauri
 cargo test
 ```
 
+There is also a hardware smoke test that exercises the capture engine against
+the machine it runs on and reports your display layout — useful for checking a
+multi-monitor or mixed-DPI setup:
+
+```bash
+cd src-tauri
+cargo run --example smoke_capture
+```
+
 ## How it works
 
-A short tour of the parts worth knowing about:
+The parts worth knowing about:
 
-- **`src-tauri/src/capture/win.rs`** — the capture backend, written directly
-  against Win32 rather than using a capture crate. It treats *virtual-screen
+- **`src-tauri/src/capture/win.rs`** — the capture backend, written against Win32
+  directly rather than using a capture crate. It treats *virtual-screen
   coordinates in physical pixels* as the one coordinate space for the whole app.
-  A single `BitBlt` of the virtual desktop returns one image whose pixel grid is
-  that coordinate space, so cropping a selection that spans two monitors is plain
-  arithmetic rather than a stitching step that can be got wrong.
+  A single `BitBlt` of the virtual desktop returns an image whose pixel grid *is*
+  that space, so cropping a selection spanning two monitors is plain arithmetic
+  rather than a stitching step that can be got wrong.
 
-- **`src-tauri/src/capture/mod.rs`** — enforces the ordering rule the whole app
-  rests on: read pixels, **write the file**, then do everything else. Nothing
-  after the write is allowed to fail the capture. A locked clipboard produces a
-  warning attached to a successful result, never a lost screenshot.
+- **`src-tauri/src/capture/mod.rs`** — enforces the ordering rule the app rests
+  on: read pixels, **write the file**, then everything else. Nothing after the
+  write may fail the capture. A locked clipboard yields a warning attached to a
+  successful result, never a lost screenshot.
 
-- **`src-tauri/src/naming.rs`** — filename generation. Never returns a path that
-  already exists, and never fails.
+- **`src-tauri/src/capture/mask.rs`** — freeform masking by scanline fill rather
+  than per-pixel point-in-polygon. The naive form is O(pixels × edges), which on
+  a real lasso is hundreds of millions of operations while the user waits.
+
+- **`src-tauri/src/history.rs`** — history is rebuilt by scanning the save folder.
+  The sidecar index only adds what the filesystem cannot know, so deleting it
+  costs metadata rather than captures.
 
 - **`src/overlay.ts`** — the capture overlay. The screen is frozen in Rust
-  *before* the overlay appears, so the overlay can never end up in its own
-  capture, nothing moving underneath can change what gets saved mid-drag, and a
+  *before* the overlay appears, so it can never end up in its own capture and a
   delayed capture can catch an open menu without the overlay closing it.
 
-- **`src-tauri/src/capture/mask.rs`** — freeform lasso masking, via a scanline
-  fill rather than a per-pixel point-in-polygon test. The naive version is
-  O(pixels x edges), which on a real lasso is hundreds of millions of operations
-  while the user waits.
-
-- **`src-tauri/src/history.rs`** — history is rebuilt by scanning the save
-  folder. The sidecar index only adds what the filesystem cannot know, so
-  deleting it costs metadata rather than captures.
-
 - **`src/editor.tsx`** — annotation. Edits are a list of shapes in *image*
-  coordinates, and the canvas is redrawn from scratch on every change. That is
-  what makes undo and redo trivially correct — there is no accumulated pixel
-  state to unwind, only a shorter list to redraw — and it means the canvas can
-  be displayed at any size without affecting the export. Saving always writes a
-  **copy**: the original was auto-saved the instant it was taken, and an edit is
-  not allowed to destroy the one thing the app promises never to lose.
+  coordinates and the canvas repaints from scratch on every change, which makes
+  undo correct by construction and keeps the export independent of display size.
+
+### Design
+
+A dark/dim monochromatic system with **no coloured accent**. The app sits on top
+of whatever you are capturing, so its chrome must never compete with the
+screenshot. Active state is pure white on dark and pure black on light, which
+reads unambiguously against any content underneath — and the selection border
+pairs a white line with a dark outer stroke for the same reason, since a
+screenshot tool cannot know what is behind it. Tokens live in `src/tokens.css`.
 
 ### Known limitation
 
-The capture backend reads the desktop that DWM has composited, which covers
-normal applications, browsers and video playback. Content drawn through a
-hardware overlay plane or protected by DRM will appear black — the same
-behaviour as most classic screenshot tools. The backend sits behind a module
-boundary so a Windows Graphics Capture path can be added without changing
-callers.
+The capture backend reads the desktop DWM has composited, which covers normal
+applications, browsers and video playback. Content drawn through a hardware
+overlay plane or protected by DRM appears black — the same behaviour as most
+classic screenshot tools. The backend sits behind a module boundary so a Windows
+Graphics Capture path can be added without changing callers.
 
 ## Roadmap
 
 - [x] Capture engine — auto-save and auto-naming that cannot lose a capture
 - [x] Overlay capture flow — rectangle, freeform, window, full screen, delay timer
 - [x] Tray and global shortcuts
-- [x] History and gallery
+- [x] History and library
 - [x] Annotation — pen, arrows, shapes, text, redaction, crop, undo/redo
-- [ ] Pinned always-on-top windows
-- [ ] Settings screen
-- [ ] Visual design pass
-- [ ] Inno Setup installer with first-run configuration
+- [x] Pinned always-on-top windows
+- [x] Settings, notifications, retention
+- [x] Visual design pass
+- [x] Inno Setup installer with first-run configuration
+- [ ] Screen recording, with resolution and frame rate settings
 
 ## Licence
 

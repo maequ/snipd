@@ -139,6 +139,9 @@ export default function SettingsPanel({
             <button type="button" onClick={() => void browse()}>
               Browse
             </button>
+            <button type="button" onClick={() => void invoke("open_save_folder")}>
+              Open
+            </button>
           </div>
         </Row>
 
@@ -190,17 +193,25 @@ export default function SettingsPanel({
                 onChange={(e) => patch({ naming: { ...draft.naming, prefix: e.target.value } })}
               />
             </Row>
-            <Row label="Next number">
-              <input
-                type="number"
-                min={1}
-                value={draft.naming.counter}
-                onChange={(e) =>
-                  patch({
-                    naming: { ...draft.naming, counter: Math.max(1, Number(e.target.value)) },
-                  })
-                }
-              />
+            <Row label="Next number" hint="Counts up forever; it never resets on its own">
+              <div className="settings__inline">
+                <input
+                  type="number"
+                  min={1}
+                  value={draft.naming.counter}
+                  onChange={(e) =>
+                    patch({
+                      naming: { ...draft.naming, counter: Math.max(1, Number(e.target.value)) },
+                    })
+                  }
+                />
+                <button
+                  type="button"
+                  onClick={() => patch({ naming: { ...draft.naming, counter: 1 } })}
+                >
+                  Reset to 1
+                </button>
+              </div>
             </Row>
           </>
         )}
