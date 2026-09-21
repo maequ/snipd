@@ -63,8 +63,10 @@ jobs:
           files: |
             installer/Output/Snipd-Setup-*.exe
             src-tauri/target/release/snipd.exe
-          # Draft, so the release notes can be written before anyone sees it.
-          draft: true
+          # Published, not drafted. A draft is invisible to everyone but the
+          # repository owner, so tagging a version would leave the README
+          # pointing at an empty Releases page.
+          draft: false
           generate_release_notes: true
           body: |
             ## Installing
