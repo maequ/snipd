@@ -85,12 +85,18 @@ export default function History({
   refreshToken,
   onEdit,
   media,
+  confirmDelete,
+  onStopConfirming,
 }: {
   refreshToken: number;
   /** Hand a capture to the editor, which lives in the main window. */
   onEdit: (entry: HistoryEntry) => void;
   /** Which tab this is: stills or recordings. */
   media: "image" | "video";
+  /** Whether deleting asks first. Mirrors the setting of the same name. */
+  confirmDelete: boolean;
+  /** Called when "Don't ask again" is ticked, so the setting can be saved. */
+  onStopConfirming: () => void;
 }) {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [total, setTotal] = useState(0);
@@ -98,7 +104,10 @@ export default function History({
   const [dateFilter, setDateFilter] = useState<DateFilter>("all");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  /** The capture the confirmation dialog is asking about. */
+  const [pendingDelete, setPendingDelete] = useState<HistoryEntry | null>(null);
+  /** Ticked inside the dialog; applied only if the delete goes ahead. */
+  const [stopAsking, setStopAsking] = useState(false);
   /** The capture open in the viewer, if any. */
   const [viewing, setViewing] = useState<HistoryEntry | null>(null);
 
@@ -185,7 +194,6 @@ export default function History({
       await invoke("history_delete", { path });
       setEntries((current) => current.filter((entry) => entry.path !== path));
       setTotal((current) => Math.max(0, current - 1));
-      setPendingDelete(null);
     } catch (err) {
       setError(String(err));
     }
@@ -293,24 +301,20 @@ export default function History({
                   <button type="button" onClick={() => void reveal(entry.path)}>
                     Show in folder
                   </button>
-                  {pendingDelete === entry.path ? (
-                    <>
-                      <button
-                        type="button"
-                        className="danger"
-                        onClick={() => void remove(entry.path)}
-                      >
-                        Move to Recycle Bin
-                      </button>
-                      <button type="button" onClick={() => setPendingDelete(null)}>
-                        Keep
-                      </button>
-                    </>
-                  ) : (
-                    <button type="button" onClick={() => setPendingDelete(entry.path)}>
-                      Delete
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className="danger"
+                    onClick={() => {
+                      if (confirmDelete) {
+                        setStopAsking(false);
+                        setPendingDelete(entry);
+                      } else {
+                        void remove(entry.path);
+                      }
+                    }}
+                  >
+                    Delete
+                  </button>
                 </div>
               </li>
             ))}
@@ -320,6 +324,21 @@ export default function History({
             {loading ? "Loading…" : ""}
           </div>
         </>
+      )}
+
+      {pendingDelete && (
+        <ConfirmDelete
+          entry={pendingDelete}
+          stopAsking={stopAsking}
+          onStopAskingChange={setStopAsking}
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={() => {
+            const path = pendingDelete.path;
+            if (stopAsking) onStopConfirming();
+            setPendingDelete(null);
+            void remove(path);
+          }}
+        />
       )}
 
       {viewing && (
@@ -440,6 +459,77 @@ function Viewer({
               Close
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+/**
+ * Confirmation before a capture is removed.
+ *
+ * A real dialog rather than the button quietly turning into a second button.
+ * That pattern put "delete for good" exactly where the mouse already was, which
+ * is precisely how an accidental double-click destroys something.
+ *
+ * It also says where the file is going. "Delete" and "moved to the Recycle Bin,
+ * where you can get it back" are very different promises, and only one of them
+ * is true here.
+ */
+function ConfirmDelete({
+  entry,
+  stopAsking,
+  onStopAskingChange,
+  onCancel,
+  onConfirm,
+}: {
+  entry: HistoryEntry;
+  stopAsking: boolean;
+  onStopAskingChange: (value: boolean) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  // Escape cancels, so the dialog can never be a trap.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  return (
+    <div className="dialog" role="presentation" onClick={onCancel}>
+      <div
+        className="dialog__panel"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="confirm-delete-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <h2 id="confirm-delete-title">Delete this {entry.isVideo ? "recording" : "capture"}?</h2>
+        <p className="dialog__name">{entry.fileName}</p>
+        <p className="dialog__body">
+          It will be moved to the Recycle Bin, so you can still get it back.
+        </p>
+
+        <label className="dialog__again">
+          <input
+            type="checkbox"
+            checked={stopAsking}
+            onChange={(event) => onStopAskingChange(event.target.checked)}
+          />
+          <span>Don&rsquo;t ask me again</span>
+        </label>
+
+        <div className="dialog__actions">
+          <button type="button" onClick={onCancel}>
+            Cancel
+          </button>
+          <button type="button" className="primary" onClick={onConfirm} autoFocus>
+            Move to Recycle Bin
+          </button>
         </div>
       </div>
     </div>

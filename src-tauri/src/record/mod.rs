@@ -18,6 +18,7 @@
 //! sliding the timeline would instead make the whole video drift out of step
 //! with reality, which is worse and much harder to notice.
 
+pub mod audio;
 pub mod encoder;
 
 use std::path::{Path, PathBuf};
@@ -29,7 +30,8 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use crate::capture::win::{self, Bounds, FrameGrabber};
-use encoder::Encoder;
+use audio::AudioCapture;
+use encoder::{AudioSpec, Encoder, VideoSpec};
 
 /// Bits spent per pixel per frame when deriving a bitrate floor.
 ///
@@ -46,6 +48,8 @@ pub struct RecordingRequest {
     /// Percentage of the captured size to encode at. 100 means native.
     pub scale_percent: u32,
     pub bitrate_mbps: u32,
+    /// Record what the machine is playing alongside the picture.
+    pub capture_audio: bool,
 }
 
 /// What a finished recording produced.
@@ -60,6 +64,9 @@ pub struct RecordingOutcome {
     pub dropped: u64,
     pub duration_ms: u64,
     pub bytes: u64,
+    /// False when audio was wanted but could not be captured, so the UI can say
+    /// so rather than leaving someone to discover a silent file later.
+    pub has_audio: bool,
 }
 
 /// Live state of a recording in progress, readable from the UI.
@@ -123,6 +130,7 @@ pub fn start(request: RecordingRequest, output: PathBuf) -> Result<ActiveRecordi
     let target_height = ((source.height as f64 * scale).round() as u32).max(16);
 
     let fps = request.fps.clamp(5, 60);
+    let capture_audio = request.capture_audio;
 
     // Screen content is mostly flat colour and sharp text, which H.264 handles
     // well — but starve it and text is the first thing to turn to mush. A fixed
@@ -155,20 +163,46 @@ pub fn start(request: RecordingRequest, output: PathBuf) -> Result<ActiveRecordi
         std::thread::Builder::new()
             .name("snipd-recorder".into())
             .spawn(move || {
+                // Started before the encoder, which needs to be told the
+                // sample rate and channel count up front. Best effort: a
+                // machine with no playback device still records picture.
+                let audio = if capture_audio {
+                    match AudioCapture::start() {
+                        Ok(capture) => Some(capture),
+                        Err(err) => {
+                            eprintln!("[record] no system audio: {err}");
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+
+                let audio_spec = audio.as_ref().map(|capture| AudioSpec {
+                    sample_rate: capture.format.sample_rate,
+                    channels: capture.format.channels,
+                });
+
                 let mut encoder = match Encoder::create(
                     &output,
-                    source.width,
-                    source.height,
-                    target_width,
-                    target_height,
-                    fps,
-                    bitrate,
+                    VideoSpec {
+                        source_width: source.width,
+                        source_height: source.height,
+                        target_width,
+                        target_height,
+                        fps,
+                        bitrate_bits: bitrate,
+                    },
+                    audio_spec,
                 ) {
                     Ok(encoder) => {
                         let _ = ready_tx.send(Ok(()));
                         encoder
                     }
                     Err(err) => {
+                        if let Some(capture) = audio {
+                            capture.stop();
+                        }
                         let _ = ready_tx.send(Err(err.clone()));
                         return Err(err);
                     }
@@ -209,6 +243,18 @@ pub fn start(request: RecordingRequest, output: PathBuf) -> Result<ActiveRecordi
                         continue;
                     }
 
+                    // Drained on this thread rather than written from the
+                    // audio thread: a sink writer is not safe to call from two
+                    // threads at once, so every WriteSample happens here.
+                    if let Some(capture) = &audio {
+                        while let Ok(chunk) = capture.chunks.try_recv() {
+                            if let Err(err) = encoder.write_audio(&chunk.bytes) {
+                                eprintln!("[record] {err}");
+                                break;
+                            }
+                        }
+                    }
+
                     match grabber.grab() {
                         Ok(pixels) => {
                             if let Err(err) = encoder.write_frame(pixels) {
@@ -229,6 +275,20 @@ pub fn start(request: RecordingRequest, output: PathBuf) -> Result<ActiveRecordi
                 }
 
                 let elapsed = began.elapsed();
+
+                // Whatever audio is still queued belongs in the file. Without
+                // this the recording would end with its sound cut short by
+                // however much had not yet been drained.
+                if let Some(capture) = audio {
+                    let remaining = capture.finish();
+                    while let Ok(chunk) = remaining.try_recv() {
+                        if encoder.write_audio(&chunk.bytes).is_err() {
+                            break;
+                        }
+                    }
+                }
+
+                let has_audio = encoder.has_audio();
                 let written = encoder.finish()?;
                 let bytes = std::fs::metadata(&output).map(|m| m.len()).unwrap_or(0);
 
@@ -241,6 +301,7 @@ pub fn start(request: RecordingRequest, output: PathBuf) -> Result<ActiveRecordi
                     dropped: dropped.load(Ordering::Relaxed),
                     duration_ms: elapsed.as_millis() as u64,
                     bytes,
+                    has_audio,
                 })
             })
             .map_err(|e| format!("could not start the recording thread: {e}"))?

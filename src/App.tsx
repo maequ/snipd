@@ -64,6 +64,17 @@ export default function App() {
    * taking a capture puts an editor in front of you without turning the
    * library into something else and back again.
    */
+  const stopConfirmingDeletes = useCallback(async () => {
+    if (!settings) return;
+    const next = { ...settings, library: { ...settings.library, confirmDelete: false } };
+    try {
+      await invoke("update_settings", { settings: next });
+      setSettings(next);
+    } catch (err) {
+      setError(String(err));
+    }
+  }, [settings]);
+
   const openEditor = useCallback(async (path: string, reviewing: boolean) => {
     try {
       await invoke("open_editor", { path, reviewing });
@@ -224,6 +235,8 @@ export default function App() {
         <History
           media="image"
           refreshToken={refreshToken}
+          confirmDelete={settings?.library.confirmDelete ?? true}
+          onStopConfirming={() => void stopConfirmingDeletes()}
           onEdit={(entry) => void openEditor(entry.path, false)}
         />
       )}
@@ -232,6 +245,8 @@ export default function App() {
         <History
           media="video"
           refreshToken={refreshToken}
+          confirmDelete={settings?.library.confirmDelete ?? true}
+          onStopConfirming={() => void stopConfirmingDeletes()}
           onEdit={(entry) => void openEditor(entry.path, false)}
         />
       )}

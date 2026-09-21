@@ -58,6 +58,7 @@ fn main() {
             fps: 30,
             scale_percent: 100,
             bitrate_mbps: 12,
+            capture_audio: true,
         },
         output.clone(),
     ) {
@@ -88,6 +89,14 @@ fn main() {
         outcome.frames, outcome.dropped
     );
     println!("  bytes     {}", outcome.bytes);
+    println!(
+        "  audio     {}",
+        if outcome.has_audio {
+            "captured"
+        } else {
+            "NOT captured"
+        }
+    );
     println!("  wall      {:.1}s", wall.as_secs_f64());
 
     // A valid MP4 always carries an 'ftyp' box at the very start. Checking for

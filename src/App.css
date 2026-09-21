@@ -771,3 +771,78 @@ kbd {
   font-size: 12px;
   line-height: 1.5;
 }
+
+/* ---------------------------------------------------------------------------
+   Dialogs
+
+   Used where an action needs a deliberate answer — deleting, above all. The
+   pattern this replaced turned the Delete button into a second Delete button
+   in the same place, which put the destructive click exactly where the mouse
+   already was.
+   --------------------------------------------------------------------------- */
+
+.dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--scrim);
+  animation: fade 120ms ease both;
+}
+
+.dialog__panel {
+  width: 100%;
+  max-width: 420px;
+  padding: 22px 24px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  animation: settle 140ms ease both;
+}
+
+.dialog__panel h2 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.dialog__name {
+  margin: 0 0 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  word-break: break-all;
+  color: var(--text);
+}
+
+.dialog__body {
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.dialog__again {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 0 4px;
+  border-top: 1px solid var(--border);
+  font-size: 12.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.dialog__again input {
+  accent-color: var(--accent);
+  flex: none;
+}
+
+.dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}

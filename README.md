@@ -39,9 +39,11 @@ immediately; the choice only changes what happens next.
 
 **Recording** — choose Record in the same overlay, drag an area, and a small bar
 shows the elapsed time with a stop button; the tray menu can stop one too, so a
-recording is never stuck running. Encoded with the H.264 encoder built into
-Windows, so there is nothing extra to install. Frame rate, resolution and
-bitrate are all configurable.
+recording is never stuck running. **System audio is recorded too** — what the
+machine is playing, captured through WASAPI loopback, so no virtual audio driver
+is needed. Encoded with the H.264 and AAC encoders built into Windows, so there
+is nothing extra to install. Frame rate, resolution, bitrate and sound are all
+configurable.
 
 **Library** — every capture, searchable by filename and filterable by date, with
 lazily loaded thumbnails so a folder of thousands stays fast.
@@ -207,7 +209,7 @@ Graphics Capture path can be added without changing callers.
 - [x] Settings, notifications, retention
 - [x] Visual design pass
 - [x] Inno Setup installer with first-run configuration
-- [x] Screen recording, with frame rate and resolution settings
+- [x] Screen recording, with sound, frame rate and resolution settings
 
 ## Contributing
 

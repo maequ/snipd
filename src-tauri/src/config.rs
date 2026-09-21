@@ -225,12 +225,32 @@ impl Default for CaptureSettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
+pub struct LibrarySettings {
+    /// Ask before a capture is removed.
+    ///
+    /// Deleting sends the file to the Recycle Bin either way, so turning this
+    /// off is a reasonable thing to want rather than a foot-gun.
+    pub confirm_delete: bool,
+}
+
+impl Default for LibrarySettings {
+    fn default() -> Self {
+        Self {
+            confirm_delete: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 pub struct RecordingSettings {
     pub fps: u32,
     /// Percentage of the captured size to encode at. Lower is the single most
     /// effective way to make recording keep up on a slower machine.
     pub scale_percent: u32,
     pub bitrate_mbps: u32,
+    /// Record what the machine is playing along with the picture.
+    pub capture_audio: bool,
 }
 
 impl Default for RecordingSettings {
@@ -241,6 +261,9 @@ impl Default for RecordingSettings {
             fps: 30,
             scale_percent: 100,
             bitrate_mbps: 12,
+            // On by default: a screen recording with no sound is rarely what
+            // anyone wanted, and it is easy to turn off.
+            capture_audio: true,
         }
     }
 }
@@ -278,6 +301,7 @@ pub struct Settings {
     pub theme: Theme,
     pub naming: NamingSettings,
     pub capture: CaptureSettings,
+    pub library: LibrarySettings,
     pub recording: RecordingSettings,
     pub clipboard: ClipboardSettings,
     pub startup: StartupSettings,
@@ -297,6 +321,7 @@ impl Default for Settings {
             theme: Theme::System,
             naming: NamingSettings::default(),
             capture: CaptureSettings::default(),
+            library: LibrarySettings::default(),
             recording: RecordingSettings::default(),
             clipboard: ClipboardSettings::default(),
             startup: StartupSettings::default(),

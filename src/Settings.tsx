@@ -30,7 +30,13 @@ export interface Settings {
     counterPadding: number;
   };
   capture: { after: "review" | "instant" };
-  recording: { fps: number; scalePercent: number; bitrateMbps: number };
+  library: { confirmDelete: boolean };
+  recording: {
+    fps: number;
+    scalePercent: number;
+    bitrateMbps: number;
+    captureAudio: boolean;
+  };
   clipboard: { autoCopy: boolean };
   startup: { launchOnLogin: boolean; startMinimised: boolean };
   window: { closeToTray: boolean };
@@ -45,7 +51,7 @@ export interface Settings {
 }
 
 const GITHUB_URL = "https://github.com/maequ/snipd";
-const APP_VERSION = "0.2.1";
+const APP_VERSION = "0.3.0";
 
 type Section = "capture" | "saving" | "recording" | "shortcuts" | "about";
 
@@ -320,6 +326,17 @@ export default function SettingsPanel({
               </Row>
             </Group>
 
+            <Group title="Deleting">
+              <Toggle
+                label="Ask before deleting a capture"
+                checked={draft.library.confirmDelete}
+                onChange={(v) => patch({ library: { confirmDelete: v } })}
+              />
+              <p className="settings__note settings__note--tight">
+                Deleted captures go to the Recycle Bin either way, so they can still be recovered.
+              </p>
+            </Group>
+
             <Group title="History">
               <Toggle
                 label="Automatically delete old captures"
@@ -358,6 +375,18 @@ export default function SettingsPanel({
 
         {section === "recording" && (
           <>
+            <Group title="Sound">
+              <Toggle
+                label="Record system audio"
+                checked={draft.recording.captureAudio}
+                onChange={(v) => patch({ recording: { ...draft.recording, captureAudio: v } })}
+              />
+              <p className="settings__note settings__note--tight">
+                Records what the machine is playing — the same thing you hear. Microphones are not
+                captured.
+              </p>
+            </Group>
+
             <Group title="Quality">
               <Row label="Frame rate" hint="Higher is smoother and larger">
                 <div className="settings__segmented">

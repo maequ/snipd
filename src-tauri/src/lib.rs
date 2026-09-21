@@ -532,6 +532,7 @@ fn start_recording(bounds: capture::Bounds, state: State<'_, AppState>) -> Resul
                 fps: settings.recording.fps,
                 scale_percent: settings.recording.scale_percent,
                 bitrate_mbps: settings.recording.bitrate_mbps,
+                capture_audio: settings.recording.capture_audio,
             },
             resolved.path,
         )

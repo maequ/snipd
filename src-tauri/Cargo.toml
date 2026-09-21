@@ -1,6 +1,6 @@
 [package]
 name = "snipd"
-version = "0.2.1"
+version = "0.3.0"
 description = "A screenshot tool for Windows that never loses a capture"
 authors = ["Snipd Contributors"]
 license = "MIT"
@@ -78,10 +78,18 @@ features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_HiDpi",
     "Win32_System_Threading",
-    # Media Foundation supplies the H.264 encoder and MP4 muxer that ship with
-    # Windows, so recording needs no bundled ffmpeg and no extra licensing.
+    # Media Foundation supplies the H.264 encoder, the AAC encoder and the MP4
+    # muxer that ship with Windows, so recording needs no bundled ffmpeg and no
+    # extra licensing.
     "Win32_Media_MediaFoundation",
     "Win32_System_Com",
+    # WASAPI, for recording what the machine is playing. Loopback capture on the
+    # default render device is the only way to get system sound without a
+    # virtual audio driver.
+    "Win32_Media_Audio",
+    "Win32_Media_KernelStreaming",
+    "Win32_System_Variant",
+    "Win32_Devices_FunctionDiscovery",
 ]
 
 [dev-dependencies]

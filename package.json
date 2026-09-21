@@ -1,6 +1,6 @@
 {
   "name": "snipd",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "A screenshot tool for Windows that never loses a capture",
   "license": "MIT",
   "private": true,
