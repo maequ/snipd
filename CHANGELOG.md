@@ -11,6 +11,24 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing yet.
 
+## [0.3.2] - 2026-09-22
+
+### Fixed
+
+- **The recorder bar stayed on screen after a recording had been saved.**
+  Stopping a recording finalises the MP4, which writes the file's index and
+  takes long enough to matter — and it was being done on the event loop, so
+  nothing could act on the bar being asked to close until it finished.
+- The same fault in three more places, found by looking for it rather than
+  waiting for it to be reported: opening the editor **from the library**,
+  pinning a capture, and closing a pin all built or closed a window from the
+  event loop, which is the freeze fixed in 0.3.1 reached by a different route.
+  Capturing from the main window did its screen read and PNG encode there too.
+
+  All of them now run off it. The rule this settles: anything that builds a
+  window, closes one, or takes long enough to notice does not belong on a
+  synchronous command.
+
 ## [0.3.1] - 2026-09-22
 
 ### Fixed

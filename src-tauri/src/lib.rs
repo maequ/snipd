@@ -217,12 +217,20 @@ fn filename_preview(naming: NamingSettings, extension: String) -> String {
 
 /// Capture immediately from the UI, bypassing the overlay.
 #[tauri::command]
-fn capture(request: CaptureRequest, state: State<'_, AppState>) -> Result<CaptureRecord, String> {
-    let mut settings = state
-        .settings
-        .lock()
-        .map_err(|_| "settings lock poisoned".to_string())?;
-    capture::capture_and_save(request, &mut settings)
+async fn capture(app: AppHandle, request: CaptureRequest) -> Result<CaptureRecord, String> {
+    // Reading a full-resolution screen and encoding a PNG of it is far too slow
+    // to do on the event loop; the whole window would sit frozen for as long as
+    // it took.
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let mut settings = state
+            .settings
+            .lock()
+            .map_err(|_| "settings lock poisoned".to_string())?;
+        capture::capture_and_save(request, &mut settings)
+    })
+    .await
+    .map_err(|e| format!("the capture thread failed: {e}"))?
 }
 
 /// Open File Explorer with the given file selected.
@@ -361,8 +369,13 @@ struct EditorTarget {
 /// a capture should put an editor in front of you the way the Snipping Tool
 /// does, and leave whatever you already had open alone.
 #[tauri::command]
-fn open_editor(app: AppHandle, path: String, reviewing: bool) -> Result<(), String> {
-    open_editor_window(&app, &path, reviewing)
+async fn open_editor(app: AppHandle, path: String, reviewing: bool) -> Result<(), String> {
+    // Off the event loop, because this builds a window. Called from the library
+    // as well as after a capture, and the library route would otherwise hit
+    // exactly the freeze the capture route used to.
+    tauri::async_runtime::spawn_blocking(move || open_editor_window(&app, &path, reviewing))
+        .await
+        .map_err(|e| format!("could not open the editor: {e}"))?
 }
 
 /// Open the editor window. The command above and the capture path both use this.
@@ -629,24 +642,36 @@ fn release_capture_session(app: &AppHandle) {
 }
 
 /// Stop the recording and finalise the file.
+///
+/// Async, and the work happens off the runtime thread, because finalising an
+/// MP4 writes its index — which takes long enough that doing it on the event
+/// loop stops the entire application while it happens. The visible symptom was
+/// the recorder bar still sitting on screen after the recording had already
+/// been saved: it had been asked to close, but nothing could act on that until
+/// the handler returned.
 #[tauri::command]
-fn stop_recording(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<record::RecordingOutcome, String> {
-    let active = {
-        let mut slot = state
-            .recording
-            .lock()
-            .map_err(|_| "recording lock poisoned".to_string())?;
-        slot.take()
-            .ok_or_else(|| "nothing is recording".to_string())?
-    };
+async fn stop_recording(app: AppHandle) -> Result<record::RecordingOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let active = {
+            let state = app.state::<AppState>();
+            let mut slot = state
+                .recording
+                .lock()
+                .map_err(|_| "recording lock poisoned".to_string())?;
+            slot.take()
+                .ok_or_else(|| "nothing is recording".to_string())?
+        };
 
-    record::hide_bar(&app);
-    let outcome = active.stop()?;
-    announce_recording(&app, &outcome);
-    Ok(outcome)
+        // Taken down first. The recording is already stopping, and leaving its
+        // bar up through the finalise makes it look like nothing happened.
+        record::hide_bar(&app);
+
+        let outcome = log::timed("finalising the recording", || active.stop())?;
+        announce_recording(&app, &outcome);
+        Ok(outcome)
+    })
+    .await
+    .map_err(|e| format!("the recording thread failed: {e}"))?
 }
 
 /// Index a finished recording and tell the UI about it.

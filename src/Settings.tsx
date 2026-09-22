@@ -51,7 +51,7 @@ export interface Settings {
 }
 
 const GITHUB_URL = "https://github.com/maequ/snipd";
-const APP_VERSION = "0.3.1";
+const APP_VERSION = "0.3.2";
 
 type Section = "capture" | "saving" | "recording" | "shortcuts" | "about";
 

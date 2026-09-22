@@ -38,7 +38,15 @@ pub type PinRegistry = Mutex<HashMap<String, PathBuf>>;
 
 /// Open a capture as a floating always-on-top window.
 #[tauri::command]
-pub fn pin_capture(app: AppHandle, path: String) -> Result<(), String> {
+pub async fn pin_capture(app: AppHandle, path: String) -> Result<(), String> {
+    // Off the event loop: this builds a window, and a window cannot be built
+    // from inside a handler the loop is still waiting on.
+    tauri::async_runtime::spawn_blocking(move || pin_capture_inner(app, path))
+        .await
+        .map_err(|e| format!("could not pin the capture: {e}"))?
+}
+
+fn pin_capture_inner(app: AppHandle, path: String) -> Result<(), String> {
     let target = PathBuf::from(&path);
     if !target.exists() {
         return Err(format!("{path} no longer exists"));
@@ -120,12 +128,23 @@ pub fn pin_state(
 
 /// Close a pin and forget it.
 #[tauri::command]
-pub fn close_pin(window: tauri::Window, state: tauri::State<'_, AppState>) -> Result<(), String> {
+pub async fn close_pin(app: AppHandle, window: tauri::Window) -> Result<(), String> {
     let label = window.label().to_string();
-    if let Ok(mut pins) = state.pins.lock() {
+    {
+        // Bound with `let ... else` rather than a trailing `if let`: the
+        // temporary a trailing `if let` produces outlives the `State` it
+        // borrows from, which the borrow checker rejects.
+        let state = app.state::<AppState>();
+        let Ok(mut pins) = state.pins.lock() else {
+            return Err("pin registry lock poisoned".into());
+        };
         pins.remove(&label);
     }
-    window.close().map_err(|e| e.to_string())
+    // Off the event loop for the same reason as the rest: closing is a window
+    // operation, and the loop has to be free to act on it.
+    tauri::async_runtime::spawn_blocking(move || window.close().map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| format!("could not close the pin: {e}"))?
 }
 
 /// Lowest unused pin number, so labels do not collide with a still-open pin.
