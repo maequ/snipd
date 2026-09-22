@@ -170,7 +170,7 @@ pub fn start(request: RecordingRequest, output: PathBuf) -> Result<ActiveRecordi
                     match AudioCapture::start() {
                         Ok(capture) => Some(capture),
                         Err(err) => {
-                            eprintln!("[record] no system audio: {err}");
+                            crate::log::line(format!("[record] no system audio: {err}"));
                             None
                         }
                     }
@@ -216,7 +216,7 @@ pub fn start(request: RecordingRequest, output: PathBuf) -> Result<ActiveRecordi
                     Ok(grabber) => grabber,
                     Err(err) => {
                         let message = format!("could not start capturing frames: {err}");
-                        eprintln!("[record] {message}");
+                        crate::log::line(format!("[record] {message}"));
                         let _ = encoder.finish();
                         return Err(message);
                     }
@@ -249,7 +249,7 @@ pub fn start(request: RecordingRequest, output: PathBuf) -> Result<ActiveRecordi
                     if let Some(capture) = &audio {
                         while let Ok(chunk) = capture.chunks.try_recv() {
                             if let Err(err) = encoder.write_audio(&chunk.bytes) {
-                                eprintln!("[record] {err}");
+                                crate::log::line(format!("[record] {err}"));
                                 break;
                             }
                         }
@@ -258,7 +258,7 @@ pub fn start(request: RecordingRequest, output: PathBuf) -> Result<ActiveRecordi
                     match grabber.grab() {
                         Ok(pixels) => {
                             if let Err(err) = encoder.write_frame(pixels) {
-                                eprintln!("[record] {err}");
+                                crate::log::line(format!("[record] {err}"));
                                 break;
                             }
                             frames.store(encoder.frames_written(), Ordering::Relaxed);
@@ -266,7 +266,7 @@ pub fn start(request: RecordingRequest, output: PathBuf) -> Result<ActiveRecordi
                         Err(err) => {
                             // A single failed grab (a display mode change, a
                             // lock screen) should not end the recording.
-                            eprintln!("[record] dropped a frame: {err}");
+                            crate::log::line(format!("[record] dropped a frame: {err}"));
                             dropped.fetch_add(1, Ordering::Relaxed);
                         }
                     }

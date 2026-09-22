@@ -13,6 +13,7 @@ pub mod capture;
 pub mod clipboard;
 pub mod config;
 pub mod history;
+pub mod log;
 pub mod naming;
 pub mod overlay;
 pub mod pin;
@@ -165,8 +166,10 @@ pub fn apply_retention(app: &AppHandle) {
 
     match history::prune(&directory, days) {
         Ok(0) => {}
-        Ok(count) => eprintln!("[retention] removed {count} capture(s) older than {days} days"),
-        Err(err) => eprintln!("[retention] {err}"),
+        Ok(count) => log::line(format!(
+            "[retention] removed {count} capture(s) older than {days} days"
+        )),
+        Err(err) => log::line(format!("[retention] {err}")),
     }
 }
 
@@ -234,6 +237,22 @@ fn reveal_in_explorer(path: String) -> Result<(), String> {
         .arg(format!("/select,{path}"))
         .spawn()
         .map_err(|e| format!("could not open Explorer: {e}"))?;
+    Ok(())
+}
+
+/// Reveal the log file, for reporting a problem.
+#[tauri::command]
+fn open_log_file() -> Result<(), String> {
+    let path = log::path();
+    if !path.exists() {
+        // Touched rather than refused: "there is no log" is a confusing answer
+        // to "show me the log".
+        let _ = std::fs::write(&path, "");
+    }
+    std::process::Command::new("explorer")
+        .arg(format!("/select,{}", path.display()))
+        .spawn()
+        .map_err(|e| format!("could not open the log: {e}"))?;
     Ok(())
 }
 
@@ -475,14 +494,31 @@ fn rename_capture(
     let stem = naming::sanitise_stem(&new_name);
     let mut target = directory.join(format!("{stem}.{extension}"));
 
-    if target == canonical {
-        return Ok(canonical.to_string_lossy().into_owned());
+    // Compared by resolving the target, not by matching path strings.
+    //
+    // `canonicalize` on Windows hands back an extended-length path (the
+    // `\\?\C:\...` form), so comparing it against a plainly built path
+    // never matches. Every save of a reviewed capture therefore looked like
+    // a collision with itself and was given a "_2" suffix, even when the
+    // name had not been touched at all.
+    let unchanged = target
+        .canonicalize()
+        .map(|resolved| resolved == canonical)
+        .unwrap_or(false);
+    if unchanged {
+        return Ok(plain(&canonical));
     }
 
     // Never clobber: if the name is taken, add a suffix rather than destroying
     // whatever is already there.
     let mut attempt = 2;
-    while target.exists() {
+    // A target that resolves to the file being renamed is not a collision.
+    while target.exists()
+        && target
+            .canonicalize()
+            .map(|resolved| resolved != canonical)
+            .unwrap_or(true)
+    {
         target = directory.join(format!("{stem}_{attempt}.{extension}"));
         attempt += 1;
         if attempt > 1000 {
@@ -491,7 +527,16 @@ fn rename_capture(
     }
 
     std::fs::rename(&canonical, &target).map_err(|e| format!("could not rename: {e}"))?;
-    Ok(target.to_string_lossy().into_owned())
+    Ok(plain(&target))
+}
+
+/// A path without the extended-length prefix Windows adds when canonicalising.
+///
+/// `\\?\C:\Users\...` is a valid path but nobody wants to read one, and it
+/// reaches the user interface wherever a canonicalised path is handed back.
+fn plain(path: &std::path::Path) -> String {
+    let text = path.to_string_lossy();
+    text.strip_prefix(r"\\?\").unwrap_or(&text).to_string()
 }
 
 /// Begin recording the given area.
@@ -752,7 +797,7 @@ fn update_settings(
     }
 
     if let Err(err) = set_launch_on_login(launch_on_login) {
-        eprintln!("[startup] {err}");
+        log::line(format!("[startup] {err}"));
     }
 
     apply_retention(&app);
@@ -914,7 +959,7 @@ pub fn run() {
     // Create the save folder now, so the first capture is not the thing that
     // discovers the configured path is unusable.
     if let Err(err) = settings.ensure_save_directory() {
-        eprintln!("[startup] save directory problem: {err}");
+        log::line(format!("[startup] save directory problem: {err}"));
     }
 
     let launched_at_login = std::env::args().any(|arg| arg == AUTOSTART_FLAG);
@@ -975,6 +1020,7 @@ pub fn run() {
         .setup(move |app| {
             let handle = app.handle();
 
+            log::startup(env!("CARGO_PKG_VERSION"), launched_at_login);
             tray::build(handle)?;
 
             let warnings = {
@@ -988,7 +1034,7 @@ pub fn run() {
             };
 
             for warning in &warnings {
-                eprintln!("[shortcuts] {warning}");
+                log::line(format!("[shortcuts] {warning}"));
             }
             if let Ok(mut slot) = handle.state::<AppState>().shortcut_warnings.lock() {
                 *slot = warnings;
@@ -1025,6 +1071,7 @@ pub fn run() {
             reveal_in_explorer,
             hide_to_tray,
             open_save_folder,
+            open_log_file,
             history_list,
             history_delete,
             copy_capture,
@@ -1052,4 +1099,41 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Snipd");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn plain_strips_the_extended_length_prefix() {
+        assert_eq!(
+            plain(Path::new(r"\\?\C:\Users\a\Pictures\shot.png")),
+            r"C:\Users\a\Pictures\shot.png"
+        );
+    }
+
+    #[test]
+    fn plain_leaves_an_ordinary_path_alone() {
+        assert_eq!(
+            plain(Path::new(r"C:\Users\a\Pictures\shot.png")),
+            r"C:\Users\a\Pictures\shot.png"
+        );
+    }
+
+    /// The bug this guards against: saving a reviewed capture compared the
+    /// canonicalised path against a plainly built one, never matched, and so
+    /// treated the file as colliding with itself and appended "_2".
+    #[test]
+    fn a_canonical_path_never_equals_the_plain_one() {
+        let canonical = Path::new(r"\\?\C:\shots\a.png");
+        let built = Path::new(r"C:\shots\a.png");
+        assert_ne!(
+            canonical, built,
+            "if these ever compare equal, rename_capture can stop resolving \
+             both sides before deciding it has a collision"
+        );
+        assert_eq!(plain(canonical), plain(built));
+    }
 }

@@ -11,6 +11,41 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing yet.
 
+## [0.3.1] - 2026-09-22
+
+### Fixed
+
+- **The application froze when taking a capture.** Releasing a selection could
+  leave it unresponsive for minutes, and quitting from the tray then left a
+  process behind that made the next launch do nothing at all.
+
+  Tauri runs a synchronous command on the main thread, and the main thread is
+  the event loop. Opening the editor from inside one meant asking the event loop
+  to build a window before the handler it was waiting on had returned. The
+  overlay never hit this only because its command happens to be declared
+  `async`. Everything that follows a capture now runs off the command's thread,
+  so it does not depend on which commands are async and which are not.
+- **Saving a reviewed capture renamed it to "_2".** The name it already had was
+  compared against its own canonicalised path, and on Windows those never match
+  because canonicalising produces an extended-length path. Every save therefore
+  looked like a collision with itself. Both sides are resolved before deciding
+  anything has collided now.
+- **The editor stayed open after saving.** Closing a window is not covered by
+  the default permission set, so the editor asking to close itself did nothing
+  at all. The same was true of the recorder bar and pinned captures.
+- **Quit now quits.** It asked the event loop to wind down, which it cannot do
+  while a thread is wedged — and a process that outlives Quit makes the
+  single-instance guard swallow the next launch, which is what "I quit it and
+  now it will not open" actually was. It now insists if asking does not work.
+
+### Added
+
+- **A log file**, at `%APPDATA%\Snipd\snipd.log`, reachable from
+  Settings → About → Show the log. The application is a windowed binary, so it
+  has no console and everything it had to say about a failure went nowhere.
+  Operations that have ever been slow enough to look like a hang are timed, so
+  a stall names itself instead of having to be guessed at.
+
 ## [0.3.0] - 2026-09-21
 
 ### Added

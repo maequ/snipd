@@ -139,7 +139,7 @@ pub fn begin_capture_detached(app: &AppHandle, mode: &str) {
     let mode = mode.to_string();
     tauri::async_runtime::spawn(async move {
         if let Err(err) = begin_capture(app.clone(), None, Some(mode)).await {
-            eprintln!("[overlay] could not start capture: {err}");
+            crate::log::line(format!("[overlay] could not start capture: {err}"));
             let _ = app.emit("capture-failed", err);
         }
     });
@@ -263,6 +263,7 @@ async fn show_overlay(app: &AppHandle) -> Result<(), String> {
             .desktop
     };
 
+    crate::log::line("[overlay] building the capture window");
     let overlay =
         WebviewWindowBuilder::new(app, OVERLAY_LABEL, WebviewUrl::App("overlay.html".into()))
             .title("Snipd capture")
@@ -315,7 +316,7 @@ where
     // `inner()` rather than `&state`: it yields a reference tied to the app's
     // own lifetime instead of to this local, which the borrow checker needs in
     // order to hand it to the closure.
-    let outcome = save(&session, state.inner());
+    let outcome = crate::log::timed("saving the capture", || save(&session, state.inner()));
     // Explicit, to make it obvious that tens of megabytes are released here
     // rather than at some later scope exit.
     drop(session);
@@ -327,36 +328,55 @@ where
     // frozen. Building the editor window takes long enough to be obvious, and
     // doing it while the overlay was still on screen is what made releasing a
     // selection appear to lock the screen on that frame.
-    close_overlay(app);
+    crate::log::timed("closing the overlay", || close_overlay(app));
 
-    match &outcome {
-        Ok(record) => {
-            crate::announce_capture(app, record);
+    // Everything after this point happens off the command's own thread.
+    //
+    // Tauri runs a synchronous command on the main thread, and the main thread
+    // is the event loop. Building a window from inside a command handler there
+    // means asking the event loop to do work it cannot get to until the handler
+    // returns — which it is waiting to do. The application simply stops, long
+    // enough for Windows to mark it "not responding".
+    //
+    // `begin_capture` never hit this because it is an async command and so runs
+    // elsewhere. Rather than depending on which commands happen to be declared
+    // async, the follow-up work is moved somewhere it is always safe.
+    let follow_up = app.clone();
+    let result = outcome.as_ref().ok().cloned();
+    let failure = outcome.as_ref().err().cloned();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let app = follow_up;
+
+        if let Some(record) = result {
+            crate::announce_capture(&app, &record);
 
             // Opening the editor is done here rather than by the main window
             // reacting to the capture event. That window is deliberately left
             // hidden in this case, and WebView2 suspends a hidden webview, so
             // an event handler inside it is not guaranteed to run at all.
-            if reviews_captures(app) {
-                if let Err(err) = crate::open_editor_window(app, &record.path, true) {
+            if reviews_captures(&app) {
+                let opened = crate::log::timed("opening the editor window", || {
+                    crate::open_editor_window(&app, &record.path, true)
+                });
+                if let Err(err) = opened {
                     // Falling back to the library is better than a capture that
                     // appears to have gone nowhere.
-                    eprintln!("[editor] {err}");
-                    crate::tray::show_main_window(app);
+                    crate::log::line(format!("[editor] {err}"));
+                    crate::tray::show_main_window(&app);
                 }
             } else {
                 // Nothing else is going to appear, so the window that was
                 // hidden to stay out of the shot comes back.
-                crate::tray::show_main_window(app);
+                crate::tray::show_main_window(&app);
             }
-        }
-        Err(message) => {
-            let _ = app.emit("capture-failed", message);
+        } else if let Some(message) = failure {
+            let _ = app.emit("capture-failed", &message);
             // A failure has nowhere else to be reported, so the window comes
             // back regardless.
-            crate::tray::show_main_window(app);
+            crate::tray::show_main_window(&app);
         }
-    }
+    });
 
     outcome
 }

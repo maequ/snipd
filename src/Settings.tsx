@@ -51,7 +51,7 @@ export interface Settings {
 }
 
 const GITHUB_URL = "https://github.com/maequ/snipd";
-const APP_VERSION = "0.3.0";
+const APP_VERSION = "0.3.1";
 
 type Section = "capture" | "saving" | "recording" | "shortcuts" | "about";
 
@@ -482,6 +482,11 @@ export default function SettingsPanel({
             </Row>
             <Row label="Licence">
               <span>MIT</span>
+            </Row>
+            <Row label="Log file" hint="Useful when reporting something that went wrong">
+              <button type="button" onClick={() => void invoke("open_log_file")}>
+                Show the log
+              </button>
             </Row>
             <p className="settings__note settings__note--tight">
               Snipd is local only. Nothing is uploaded, there is no account, and no telemetry is

@@ -58,7 +58,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
             "window" => crate::capture_immediate(app, crate::ImmediateMode::ActiveWindow),
             "stop-recording" => stop_recording_from_tray(app),
             "open" => show_main_window(app),
-            "quit" => app.exit(0),
+            "quit" => quit_app(app),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
@@ -74,6 +74,26 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         .build(app)?;
 
     Ok(())
+}
+
+/// Quit, and make sure it happens.
+///
+/// `app.exit` asks the event loop to wind down, which it cannot do if a thread
+/// is wedged — and a process that lingers after Quit is worse than an abrupt
+/// one, because the single-instance guard then makes the *next* launch do
+/// nothing at all. That is exactly what "I quit it and now it will not open"
+/// looks like. So: ask nicely, then insist.
+fn quit_app(app: &AppHandle) {
+    crate::log::line("[app] quitting");
+    app.exit(0);
+
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        crate::log::line("[app] still alive after exit(0); terminating");
+        let _ = app;
+        std::process::exit(0);
+    });
 }
 
 /// Stop a recording from the tray.
@@ -102,7 +122,7 @@ fn stop_recording_from_tray(app: &AppHandle) {
         crate::record::hide_bar(&app);
         match active.stop() {
             Ok(outcome) => crate::announce_recording(&app, &outcome),
-            Err(err) => eprintln!("[record] stopping from the tray failed: {err}"),
+            Err(err) => crate::log::line(format!("[record] stopping from the tray failed: {err}")),
         }
     });
 }
@@ -137,6 +157,8 @@ pub fn show_main_window(app: &AppHandle) {
             let _ = window.show();
             let _ = window.set_focus();
         }
-        Err(err) => eprintln!("[window] could not recreate the main window: {err}"),
+        Err(err) => crate::log::line(format!(
+            "[window] could not recreate the main window: {err}"
+        )),
     }
 }
